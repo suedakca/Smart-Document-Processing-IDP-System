@@ -1,0 +1,12 @@
+paddleocr>=2.7.0
+paddlepaddle>=2.5.2
+opencv-python-headless
+fastapi
+uvicorn
+python-multipart
+pandas
+numpy
+thefuzz
+python-dotenv
+pydantic
+scikit-image

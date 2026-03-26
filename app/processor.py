@@ -7,7 +7,8 @@ from .preprocessing import ImagePreprocessor
 class DocumentProcessor:
     def __init__(self, lang='tr'):
         # Removing explicit side limits to avoid version-specific argument errors
-        self.ocr = PaddleOCR(use_textline_orientation=False, lang=lang)
+        # Enabling angle classification for better orientation handling
+        self.ocr = PaddleOCR(use_angle_cls=True, lang=lang)
         self.preprocessor = ImagePreprocessor()
         self.logger = logging.getLogger(__name__)
 

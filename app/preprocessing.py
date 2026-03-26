@@ -16,15 +16,11 @@ class ImagePreprocessor:
         return cv2.GaussianBlur(image, (5, 5), 0)
 
     @staticmethod
-    def thresholding(image):
+    def adjust_contrast(image):
         """
-        Aggressive adaptive thresholding for high contrast.
+        Enhance contrast without destroying character edges.
         """
-        if len(image.shape) == 3:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        return cv2.adaptiveThreshold(
-            image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10
-        )
+        return cv2.convertScaleAbs(image, alpha=1.3, beta=0)
 
     @staticmethod
     def sharpen(image):
@@ -32,7 +28,7 @@ class ImagePreprocessor:
         return cv2.filter2D(image, -1, kernel)
 
     @staticmethod
-    def resize_if_needed(image, max_size=2500):
+    def resize_if_needed(image, max_size=2000):
         h, w = image.shape[:2]
         if max(h, w) > max_size:
             scale = max_size / max(h, w)
@@ -83,12 +79,10 @@ class ImagePreprocessor:
         # 2. Deskew (Straighten tilted document)
         straightened = self.deskew(resized)
         
-        # 3. Grayscale & Sharpen
+        # 3. Grayscale
         gray = self.grayscale(straightened)
-        sharpened = self.sharpen(gray)
         
-        # 4. Adaptive Thresholding (Binarization)
-        # This significantly helps OCR in low-contrast areas
-        binarized = self.thresholding(sharpened)
+        # 4. Contrast Enhancement
+        enhanced = self.adjust_contrast(gray)
         
-        return binarized
+        return enhanced

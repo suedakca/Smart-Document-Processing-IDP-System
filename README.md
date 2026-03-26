@@ -35,7 +35,7 @@ API'ye `http://localhost:8000` adresinden erişebilirsiniz.
 pip install -r requirements.txt
 
 # Uygulamayı çalıştırın
-python -m app.main
+python3 -m app.main
 ```
 
 ## 📐 Sistem Mimarisi
@@ -51,4 +51,4 @@ python -m app.main
 *   **Doğruluk:** Standart dokümanlarda %98.2+.
 
 ---
-*Geliştiren: Suheda Akca*
+*Geliştiren: Sueda Akça*

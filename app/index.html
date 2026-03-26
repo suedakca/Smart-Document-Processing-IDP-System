@@ -212,9 +212,12 @@
                             <span id="doc-type-label" style="font-weight: 700; color: var(--accent);"></span>
                             <span id="doc-conf-label" style="font-size: 0.8rem; color: var(--text-muted); margin-left: 1rem;"></span>
                         </div>
-                        <div style="display: flex; gap: 1rem; font-size: 0.85rem;">
-                            <span id="math-status" style="padding: 2px 8px; border-radius: 4px;"></span>
-                            <span id="trust-score-label" style="color: var(--text-muted);"></span>
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem;">
+                            <div style="display: flex; gap: 1rem;">
+                                <span id="math-status" style="padding: 2px 8px; border-radius: 4px;"></span>
+                                <span id="trust-score-label" style="color: var(--text-muted);"></span>
+                            </div>
+                            <div id="math-details" style="font-family: monospace; color: var(--text-muted); font-size: 0.75rem;"></div>
                         </div>
                     </div>
                 </div>
@@ -222,6 +225,13 @@
                     <h3 style="margin-bottom: 1rem; font-size: 1rem; color: var(--text-muted);">Yapılandırılmış Veri (JSON)</h3>
                     <pre class="json-viewer" id="json-output"></pre>
                 </div>
+            </div>
+        </section>
+
+        <section id="history-section" style="margin-top: 4rem; width: 100%;">
+            <h2 style="margin-bottom: 1.5rem; color: var(--accent); font-size: 1.5rem;">Geçmiş İşlemler</h2>
+            <div id="history-list" style="display: grid; gap: 1rem;">
+                <!-- History items will be injected here -->
             </div>
         </section>
     </div>
@@ -234,8 +244,76 @@
         const imagePreview = document.getElementById('image-preview');
         const jsonOutput = document.getElementById('json-output');
         const loading = document.getElementById('loading');
+        const historyList = document.getElementById('history-list');
 
         let selectedFile = null;
+
+        // Fetch history on load
+        window.addEventListener('DOMContentLoaded', fetchHistory);
+
+        async function fetchHistory() {
+            try {
+                const response = await fetch('/history?limit=5');
+                const data = await response.json();
+                
+                historyList.innerHTML = '';
+                if (data.length === 0) {
+                    historyList.innerHTML = '<p style="color: var(--text-muted); text-align: center;">Henüz işlem geçmişi yok.</p>';
+                    return;
+                }
+
+                data.forEach(item => {
+                    const card = document.createElement('div');
+                    card.style.cssText = `
+                        background: var(--glass);
+                        padding: 1rem 1.5rem;
+                        border-radius: 1rem;
+                        border: 1px solid rgba(255,255,255,0.1);
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        transition: all 0.2s ease;
+                        cursor: pointer;
+                    `;
+                    card.onclick = () => showResult(JSON.parse(item.extracted_json), item.filename);
+                    
+                    card.innerHTML = `
+                        <div>
+                            <div style="font-weight: 600;">${item.filename}</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted);">${new Date(item.created_at).toLocaleString()}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.8rem; color: var(--accent); font-weight: 700;">${item.document_type.toUpperCase()}</div>
+                            <div style="font-size: 0.75rem; color: ${item.trust_score > 0.8 ? '#4ade80' : '#f87171'}">Güven: ${item.trust_score}</div>
+                        </div>
+                    `;
+                    historyList.appendChild(card);
+                });
+            } catch (error) {
+                console.error('History fetch error:', error);
+            }
+        }
+
+        function showResult(extraction, filename) {
+            document.getElementById('metadata-badge').style.display = 'block';
+            document.getElementById('doc-type-label').textContent = 'BELGE TÜRÜ: ' + extraction.raw_text ? 'LOADED' : 'HISTORY';
+            
+            // Note: We don't have the original image in history, so we clear it or show a placeholder
+            imagePreview.src = ''; 
+            
+            const mathEl = document.getElementById('math-status');
+            const math = extraction.validation.math;
+            mathEl.textContent = 'Matematik: ' + (math.status || 'N/A');
+            mathEl.style.background = math.math_valid ? 'rgba(0,255,0,0.1)' : 'rgba(255,0,0,0.1)';
+            mathEl.style.color = math.math_valid ? '#4ade80' : '#f87171';
+            
+            document.getElementById('math-details').textContent = math.check || '';
+            document.getElementById('trust-score-label').textContent = 'Güven Skoru: ' + extraction.security.trust_score;
+
+            jsonOutput.textContent = JSON.stringify(extraction, null, 2);
+            resultsSection.style.display = 'block';
+            resultsSection.scrollIntoView({ behavior: 'smooth' });
+        }
 
         dropZone.onclick = () => fileInput.click();
 
@@ -308,6 +386,9 @@
 
                     jsonOutput.textContent = JSON.stringify(result.extraction, null, 2);
                     resultsSection.style.display = 'block';
+                    
+                    // Refresh history
+                    fetchHistory();
                 } else {
                     const errorMsg = result.detail || result.message || 'Bilinmeyen bir hata oluştu';
                     alert('Hata: ' + errorMsg);

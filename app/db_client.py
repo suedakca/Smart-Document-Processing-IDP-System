@@ -31,3 +31,14 @@ class DatabaseClient:
         ''', (filename, doc_type, trust_score, json.dumps(result_dict)))
         conn.commit()
         conn.close()
+
+    def get_history(self, limit=10):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM extractions ORDER BY created_at DESC LIMIT ?
+        ''', (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]

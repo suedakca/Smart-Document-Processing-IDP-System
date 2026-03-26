@@ -8,6 +8,7 @@ from .preprocessing import ImagePreprocessor
 from .processor import DocumentProcessor
 from .postprocessing import DataExtractor
 from .classifier import DocumentClassifier
+from .db_client import DatabaseClient
 from dotenv import load_dotenv
 load_dotenv() 
 
@@ -21,6 +22,7 @@ preprocessor = ImagePreprocessor()
 doc_processor = DocumentProcessor()
 data_extractor = DataExtractor()
 classifier = DocumentClassifier()
+db = DatabaseClient()
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -30,6 +32,14 @@ async def root():
     index_path = os.path.join(os.path.dirname(__file__), "index.html")
     with open(index_path, "r", encoding="utf-8") as f:
         return f.read()
+
+@app.get("/history")
+async def get_history(limit: int = 10):
+    try:
+        return db.get_history(limit=limit)
+    except Exception as e:
+        logger.error(f"Error fetching history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/process")
 async def process_document(file: UploadFile = File(...)):
@@ -54,7 +64,15 @@ async def process_document(file: UploadFile = File(...)):
         # 5. Extract and Validate Structured Data
         extracted_data = data_extractor.extract(ocr_results, doc_type=doc_type)
         
-        # 6. Cleanup
+        # 6. Save to Database
+        db.save_result(
+            filename=file.filename,
+            doc_type=doc_type,
+            trust_score=extracted_data["security"]["trust_score"],
+            result_dict=extracted_data
+        )
+
+        # 7. Cleanup
         if os.path.exists(temp_path):
             os.remove(temp_path)
         

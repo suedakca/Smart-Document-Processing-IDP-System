@@ -18,9 +18,14 @@ class ImagePreprocessor:
     @staticmethod
     def adjust_contrast(image):
         """
-        Enhance contrast without destroying character edges.
+        Using CLAHE (Contrast Limited Adaptive Histogram Equalization) 
+        for robust contrast enhancement in varying light.
         """
-        return cv2.convertScaleAbs(image, alpha=1.3, beta=0)
+        if len(image.shape) == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        return clahe.apply(image)
 
     @staticmethod
     def sharpen(image):
@@ -40,30 +45,28 @@ class ImagePreprocessor:
     @staticmethod
     def deskew(image):
         """
-        Detects the skew angle and rotates the image to straighten it.
+        Robuster deskewing: detect orientation and straighten.
         """
-        # Best for documents: Use Hough Transform on the text lines
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-        edges = cv2.Canny(gray, 50, 150, apertureSize=3)
-        lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100, minLineLength=100, maxLineGap=10)
+        # Invert (PaddleOCR likes black on white, but for lines we might need white on black)
+        gray = cv2.bitwise_not(gray)
         
-        angles = []
-        if lines is not None:
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-                angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
-                # Only consider horizontal-ish angles
-                if abs(angle) < 45:
-                    angles.append(angle)
+        # Threshold to keep only text
+        thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
         
-        if not angles:
-            return image
+        # Grab (x, y) coordinates of all non-zero pixels (the text)
+        coords = np.column_stack(np.where(thresh > 0))
+        angle = cv2.minAreaRect(coords)[-1]
+        
+        # Handling different opencv versions of minAreaRect angle return
+        if angle < -45:
+            angle = -(90 + angle)
+        else:
+            angle = -angle
             
-        median_angle = np.median(angles)
-        
         (h, w) = image.shape[:2]
         center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)
         rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
         
         return rotated
@@ -73,16 +76,16 @@ class ImagePreprocessor:
         if img is None:
             raise ValueError(f"Could not read image from {image_path}")
             
-        # 1. Resize if too large to prevent OOM
-        resized = self.resize_if_needed(img)
+        # 1. Resize if too large
+        img = self.resize_if_needed(img)
         
-        # 2. Deskew (Straighten tilted document)
-        straightened = self.deskew(resized)
+        # 2. Deskew
+        img = self.deskew(img)
         
-        # 3. Grayscale
-        gray = self.grayscale(straightened)
+        # 3. CLAHE Contrast (returns grayscale)
+        processed = self.adjust_contrast(img)
         
-        # 4. Contrast Enhancement
-        enhanced = self.adjust_contrast(gray)
+        # Optional: Sharpen if still blurry? 
+        # processed = self.sharpen(processed)
         
-        return enhanced
+        return processed

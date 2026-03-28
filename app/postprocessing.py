@@ -7,13 +7,16 @@ class ValidationEngine:
         """
         Fixes common OCR character confusion and removes noise.
         """
-        # Remove common currency symbols and prefix noise (like 'e' in 'e 250,00')
+        # Remove common currency symbols and prefix noise
         text = re.sub(r'^[eE]\s*', '', text) 
+        text = text.replace('TL', '').replace('$', '').replace('€', '6')
         
         corrections = {
-            '€': '6', 'E': '6', 'O': '0', 'o': '0',
-            'S': '5', 's': '5', 'B': '8', 'I': '1',
-            'l': '1', '|': '1', 'Ş': '5'
+            'E': '6', 'O': '0', 'o': '0', 'Q': '0',
+            'S': '5', 's': '5', 'Ş': '5', 'ş': '5',
+            'B': '8', 'I': '1', 'i': '1', 'l': '1', 
+            '|': '1', 'L': '1', 'G': '6', 'g': '9',
+            'Z': '2', 'z': '2', 'A': '4', 'a': '4'
         }
         for wrong, right in corrections.items():
             text = text.replace(wrong, right)
@@ -22,8 +25,44 @@ class ValidationEngine:
         text = re.sub(r'(\d)\s+([,.]\d)', r'\1\2', text)
         text = re.sub(r'([,.])\s+(\d)', r'\1\2', text)
         
+        # Keep only digits and separators
         clean = re.sub(r"[^\d.,]", "", text)
         return clean
+
+    @staticmethod
+    def to_float(val):
+        if not val: return 0.0
+        clean = ValidationEngine.clean_financial_text(str(val))
+        
+        if not clean: return 0.0
+        
+        # Logic to determine which one is the decimal separator
+        # Turkish standard: 1.250,50 (dot for thousands, comma for decimal)
+        # But OCR often swaps them or misses some.
+        
+        if "," in clean and "." in clean:
+            # If both exist, the last one is usually the decimal separator
+            dot_idx = clean.rfind('.')
+            comma_idx = clean.rfind(',')
+            if dot_idx > comma_idx:
+                # 1,250.50 format
+                clean = clean.replace(",", "")
+            else:
+                # 1.250,50 format
+                clean = clean.replace(".", "").replace(",", ".")
+        elif "," in clean:
+            # Only comma -> 250,50
+            clean = clean.replace(",", ".")
+        
+        try:
+            # Remove any remaining multiple dots if OCR hallucinated
+            if clean.count('.') > 1:
+                parts = clean.split('.')
+                clean = "".join(parts[:-1]) + "." + parts[-1]
+                
+            return float(clean) if any(c.isdigit() for c in clean) else 0.0
+        except:
+            return 0.0
 
     @staticmethod
     def check_math(extracted_keywords):
@@ -32,13 +71,7 @@ class ValidationEngine:
         """
         try:
             def to_float(val):
-                if not val: return 0.0
-                clean = ValidationEngine.clean_financial_text(str(val))
-                if "," in clean and "." in clean:
-                    clean = clean.replace(".", "").replace(",", ".")
-                elif "," in clean:
-                    clean = clean.replace(",", ".")
-                return float(clean) if clean and any(c.isdigit() for c in clean) else 0.0
+                return ValidationEngine.to_float(val)
 
             # Dynamic check based on keywords
             # Example for Garanti/Bank receipts
@@ -83,7 +116,8 @@ class DataExtractor:
             "tax_id": r"\d{10,11}"
         }
         # Generic amount pattern: handles dots/commas as separators and 0-3 decimal places
-        self.amount_pattern = r"(\d{1,3}(?:[\s.,]\d{3})*(?:[.,]\d{0,3}))"
+        # Generic amount pattern: handles dots/commas as separators
+        self.amount_pattern = r"(\d{1,3}(?:[\s.,]\d{3})*(?:[.,]\d{1,3})?|\d+[.,]\d{1,3}|\d+)"
         
         # Target keywords for fuzzy matching (Semantik Mapping)
         self.keywords = {

@@ -41,28 +41,41 @@ class DocumentProcessor:
                 
             extracted_data = []
             
-            # Paddlex 3.4.0 often returns a list of dictionaries or a single dictionary
+            # Handle List[List] format (Standard PaddleOCR)
+            # Format: [[box, (text, score)], ...]
+            if isinstance(result, list) and len(result) > 0 and isinstance(result[0], list) and not isinstance(result[0][0], dict):
+                for page in result:
+                    for line in page:
+                        if len(line) == 2:
+                            box, (text, score) = line
+                            extracted_data.append({
+                                "text": text,
+                                "confidence": float(score),
+                                "bbox": box
+                            })
+                return extracted_data
+
+            # Handle Dict format (PaddleX or newer versions)
             pages = result if isinstance(result, list) else [result]
             
             for page in pages:
-                if not isinstance(page, dict):
-                    self.logger.warning(f"Unexpected page format: {type(page)}")
-                    continue
-                
-                # Extract texts, scores, and boxes from dictionary keys
-                texts = page.get("rec_texts", [])
-                scores = page.get("rec_scores", [])
-                boxes = page.get("dt_polys", []) # or rec_polys
-                
-                for i in range(len(texts)):
-                    try:
+                if isinstance(page, dict):
+                    texts = page.get("rec_texts", [])
+                    scores = page.get("rec_scores", [])
+                    boxes = page.get("dt_polys", [])
+                    
+                    for i in range(len(texts)):
                         extracted_data.append({
                             "text": texts[i],
                             "confidence": float(scores[i]) if i < len(scores) else 0.0,
                             "bbox": boxes[i] if i < len(boxes) else []
                         })
-                    except Exception:
-                        continue
+                elif isinstance(page, list):
+                    # Fallback for nested list without clear structure
+                    for item in page:
+                        if isinstance(item, list) and len(item) == 2:
+                            box, (text, score) = item
+                            extracted_data.append({"text": text, "confidence": float(score), "bbox": box})
                 
             return extracted_data
         except Exception as e:

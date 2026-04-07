@@ -9,6 +9,29 @@ class DatabaseClient:
     def _init_db(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        
+        # 1. Users/Departments
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # 2. API Keys
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_hash TEXT UNIQUE,
+                user_id INTEGER,
+                label TEXT,
+                is_active INTEGER DEFAULT 1,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+        ''')
+        
+        # 3. Extractions & Metrics
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS extractions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,21 +39,74 @@ class DatabaseClient:
                 document_type TEXT,
                 trust_score REAL,
                 extracted_json TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                processing_time REAL,
+                error_type TEXT,
+                api_key_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(api_key_id) REFERENCES api_keys(id)
             )
         ''')
         conn.commit()
         conn.close()
 
-    def save_result(self, filename, doc_type, trust_score, result_dict):
+    def create_api_key(self, user_name, label="Default"):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (name) VALUES (?)", (user_name,))
+        cursor.execute("SELECT id FROM users WHERE name = ?", (user_name,))
+        uid = cursor.fetchone()[0]
+        
+        # Simplified for demo: return plain key and store plain (real version uses hashes)
+        raw_key = f"sk_{uuid.uuid4().hex[:12]}"
+        cursor.execute("INSERT INTO api_keys (key_hash, user_id, label) VALUES (?, ?, ?)", (raw_key, uid, label))
+        conn.commit()
+        conn.close()
+        return raw_key
+
+    def verify_key(self, key):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM api_keys WHERE key_hash = ? AND is_active = 1", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else None
+
+    def save_result(self, filename, doc_type, trust_score, result_dict, processing_time=0.0, error_type=None, key_id=None):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO extractions (filename, document_type, trust_score, extracted_json)
-            VALUES (?, ?, ?, ?)
-        ''', (filename, doc_type, trust_score, json.dumps(result_dict)))
+            INSERT INTO extractions (filename, document_type, trust_score, extracted_json, processing_time, error_type, api_key_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (filename, doc_type, trust_score, json.dumps(result_dict), processing_time, error_type, key_id))
         conn.commit()
         conn.close()
+
+    def get_stats(self):
+        """Returns statistics for Dashboard."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Doc distribution
+        cursor.execute("SELECT document_type, COUNT(*) FROM extractions GROUP BY document_type")
+        docs = dict(cursor.fetchall())
+        
+        # Success Rate (trust_score > 0.90 as proxy)
+        cursor.execute("SELECT COUNT(*) FROM extractions WHERE trust_score >= 0.90")
+        success = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM extractions")
+        total = cursor.fetchone()[0] or 1
+        
+        # Average processing time
+        cursor.execute("SELECT AVG(processing_time) FROM extractions")
+        avg_time = cursor.fetchone()[0] or 0.0
+        
+        conn.close()
+        return {
+            "doc_types": docs,
+            "success_rate": (success / total) * 100,
+            "avg_processing_time": round(avg_time, 2),
+            "total_documents": total
+        }
 
     def get_history(self, limit=10):
         conn = sqlite3.connect(self.db_path)

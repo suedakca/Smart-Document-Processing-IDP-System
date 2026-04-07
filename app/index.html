@@ -3,71 +3,79 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart IDP - Hierarchical Validation V3</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <title>Smart IDP System - Corporate</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --primary: #6366f1;
-            --primary-hover: #4f46e5;
-            --bg: #0b0f1a;
-            --glass: rgba(17, 24, 39, 0.8);
-            --text-main: #f1f5f9;
+            --primary-dark: #4f46e5;
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --text: #f1f5f9;
             --text-muted: #94a3b8;
-            --accent: #38bdf8;
             --success: #10b981;
             --warning: #f59e0b;
             --error: #ef4444;
-            --border: rgba(255, 255, 255, 0.08);
+            --border: #334155;
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+        body { background-color: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem; }
 
-        body {
-            background: radial-gradient(circle at top right, #1e1b4b, #0b0f1a);
-            color: var(--text-main);
-            min-height: 100vh;
-            display: flex; flex-direction: column; align-items: center; padding: 2rem;
+        .container { max-width: 1000px; margin: 0 auto; }
+        
+        /* Auth Section */
+        .auth-box {
+            background: var(--card-bg); padding: 1.5rem; border-radius: 1rem; border: 1px solid var(--border);
+            margin-bottom: 2rem; display: flex; align-items: center; gap: 1rem;
+        }
+        .auth-box input {
+            flex: 1; background: rgba(0,0,0,0.2); border: 1px solid var(--border); color: white;
+            padding: 0.75rem; border-radius: 0.5rem; outline: none; transition: 0.3s;
+        }
+        .auth-box input:focus { border-color: var(--primary); }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid var(--border); }
+        .tab { 
+            padding: 1rem 2rem; cursor: pointer; font-weight: 600; border-bottom: 3px solid transparent;
+            color: var(--text-muted); transition: 0.3s;
+        }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+        header { text-align: center; margin-bottom: 3rem; }
+        header h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 0.5rem; }
+        header p { color: var(--text-muted); font-size: 1.1rem; }
+
+        .v3-card {
+            background: var(--card-bg); border-radius: 1.5rem; padding: 2rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            border: 1px solid var(--border); margin-bottom: 2rem;
         }
 
-        .container { max-width: 1200px; width: 100%; }
+        /* Dashboard */
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+        .stat-card { background: rgba(0,0,0,0.2); padding: 1.5rem; border-radius: 1rem; text-align: center; }
+        .stat-value { font-size: 2rem; font-weight: 800; color: var(--primary); }
 
-        header { text-align: center; margin-bottom: 3.5rem; }
-        h1 { font-size: 3rem; font-weight: 700; background: linear-gradient(to right, #6366f1, #38bdf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -1px; margin-bottom: 0.5rem; }
-        p.subtitle { color: var(--text-muted); font-size: 1.1rem; }
-
-        .upload-section {
-            background: var(--glass); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: 1.5rem;
-            padding: 3rem; text-align: center; margin-bottom: 3rem; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        .drop-zone {
+            border: 2px dashed var(--border); border-radius: 1rem; padding: 3rem;
+            text-align: center; transition: all 0.3s ease; cursor: pointer; background: rgba(255, 255, 255, 0.02);
         }
-
-        .drop-zone { border: 2px dashed rgba(255, 255, 255, 0.1); border-radius: 1rem; padding: 3rem 2rem; cursor: pointer; transition: all 0.3s ease; }
         .drop-zone:hover { border-color: var(--primary); background: rgba(99, 102, 241, 0.05); }
         input[type="file"] { display: none; }
 
         /* Toggle Switch */
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 44px;
-            height: 24px;
-        }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background-color: rgba(255, 255, 255, 0.1);
-            transition: .4s;
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1); transition: .4s;
         }
         .slider:before {
-            position: absolute;
-            content: "";
-            height: 18px;
-            width: 18px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: .4s;
+            position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
+            background-color: white; transition: .4s;
         }
         input:checked + .slider { background-color: var(--success); }
         input:checked + .slider:before { transform: translateX(20px); }
@@ -77,223 +85,296 @@
         .btn {
             background: var(--primary); color: white; border: none; padding: 1rem 2.5rem; border-radius: 0.75rem;
             font-weight: 600; cursor: pointer; transition: all 0.3s ease; display: inline-flex; align-items: center; gap: 0.5rem;
-            margin-top: 1.5rem; box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.4);
+            width: 100%; justify-content: center; font-size: 1rem;
         }
+        .btn:hover { background: var(--primary-dark); transform: translateY(-2px); }
+        .btn:disabled { background: var(--border); cursor: not-allowed; }
 
-        .results { display: none; animation: slideUp 0.6s ease-out; }
-        .results-grid { display: grid; grid-template-columns: 350px 1fr; gap: 2rem; align-items: start; }
+        .btn-secondary { background: rgba(255,255,255,0.1); }
+        .btn-secondary:hover { background: rgba(255,255,255,0.2); }
 
-        .preview-card { position: sticky; top: 2rem; }
-        .preview-img { width: 100%; border-radius: 1.25rem; border: 1px solid var(--border); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3); }
+        .spinning { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-        .analysis-card { background: var(--glass); border: 1px solid var(--border); border-radius: 1.5rem; padding: 2rem; }
-        .hierarchy-viewer { margin-top: 1.5rem; }
-
-        .v3-block { background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; }
-        .v3-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 1rem; }
-
-        .root-transaction { border-left: 4px solid var(--accent); position: relative; }
-        .root-amount { font-size: 2.5rem; font-weight: 700; color: var(--text-main); line-height: 1; }
-        .text-confirmation { font-size: 0.9rem; color: var(--accent); margin-top: 0.5rem; font-style: italic; display: flex; align-items: center; gap: 0.5rem; }
-
-        .adjustment-item { background: rgba(255,255,255,0.03); border-radius: 0.75rem; padding: 1rem; margin-top: 0.75rem; display: flex; justify-content: space-between; align-items: center; }
-        .math-status { font-size: 0.7rem; font-weight: 700; padding: 0.25rem 0.5rem; border-radius: 0.4rem; }
-        .status-match { background: rgba(16, 185, 129, 0.12); color: var(--success); }
-        .status-mismatch { background: rgba(239, 68, 68, 0.12); color: var(--error); }
-
-        .engine-report-mini { display: flex; gap: 2rem; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
-        .metric { display: flex; flex-direction: column; }
-        .metric-val { font-size: 1.25rem; font-weight: 700; color: var(--success); }
-        .metric-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
-
-        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-        .spinner { border: 3px solid rgba(255, 255, 255, 0.1); border-left-color: var(--primary); border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: none; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        @media (max-width: 900px) { .results-grid { grid-template-columns: 1fr; } }
+        .results { display: none; }
+        .result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem; }
+        .adjustment-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 0.5rem; margin-bottom: 0.5rem;
+        }
+        pre { background: #000; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; font-size: 0.85rem; color: #10b981; }
+        .v3-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem; }
+        .math-status { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 800; }
+        .status-match { background: var(--success); color: #fff; }
+        .status-mismatch { background: var(--error); color: #fff; }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Auth -->
+        <div class="auth-box">
+            <span style="font-weight: 700; font-size: 0.8rem; color: var(--primary);">X-API-KEY:</span>
+            <input type="password" id="api-key" placeholder="sk_...">
+        </div>
+
         <header>
-            <h1>Smart IDP <span style="font-weight: 300; font-size: 1.5rem; opacity: 0.6;">V3.0</span></h1>
-            <p class="subtitle">Hierarchical Validation & Financial Decision Tree</p>
+            <h1>IDP <span style="color: var(--primary)">Core V3</span></h1>
+            <p>Faz 3: Kurumsal Hazırlık & Dashboard</p>
         </header>
 
-        <section class="upload-section">
-            <div class="drop-zone" id="drop-zone">
-                <i style="font-size: 3rem; display: block; margin-bottom: 1rem; color: var(--primary);">📥</i>
-                <p>Dosyayı sürükleyin veya <span style="color: var(--primary); font-weight: 700; text-decoration: underline;">tıklayın</span></p>
-                <input type="file" id="file-input" accept="image/*,.pdf">
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('upload', event)">DOKÜMAN YÜKLE</div>
+            <div class="tab" onclick="showTab('dashboard', event)">ANALYTICS PANEL</div>
+        </div>
+
+        <!-- Section: Upload -->
+        <div id="upload-section">
+            <div class="v3-card">
+                <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                    <i style="font-size: 3rem; display: block; margin-bottom: 1rem; color: var(--primary);">📥</i>
+                    <p>Dosyayı sürükleyin veya <span style="color: var(--primary); font-weight: 700; text-decoration: underline;">tıklayın</span></p>
+                    <input type="file" id="file-input" accept="image/*,.pdf">
+                </div>
+
+                <div style="margin: 1.5rem 0; display: flex; align-items: center; justify-content: center; gap: 0.8rem;">
+                    <label class="switch">
+                        <input type="checkbox" id="kvkk-toggle">
+                        <span class="slider round"></span>
+                    </label>
+                    <span style="font-size: 0.9rem; font-weight: 500;">KVKK Modu (PII Masking)</span>
+                </div>
+
+                <button class="btn" id="upload-btn">
+                    <span>ANALİZİ BAŞLAT</span>
+                    <i id="spinner-icon" style="display: none;" class="spinning">⏳</i>
+                </button>
             </div>
 
-            <!-- Phase 2: KVKK Toggle -->
-            <div style="margin: 1.5rem 0; display: flex; align-items: center; justify-content: center; gap: 0.8rem;">
-                <label class="switch">
-                    <input type="checkbox" id="kvkk-toggle">
-                    <span class="slider round"></span>
-                </label>
-                <span style="font-size: 0.9rem; font-weight: 500; color: var(--text);">KVKK Modu (PII Masking)</span>
-            </div>
+            <div class="results" id="results-section">
+                <!-- Export Controls -->
+                <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                    <button class="btn btn-secondary" onclick="exportDoc('csv')">CSV EXPORT</button>
+                    <button class="btn btn-secondary" onclick="exportDoc('ubl')">UBL-TR (XML) EXPORT</button>
+                </div>
 
-            <button class="btn" id="upload-btn">
-                <span>ANALİZİ BAŞLAT</span>
-                <div class="spinner" id="spinner"></div>
-            </button>
-        </section>
-
-        <section class="results" id="results-section">
-            <div class="results-grid">
-                <div class="preview-card">
-                    <img id="image-preview" class="preview-img" src="" alt="Preview">
-                    <div class="v3-block" style="margin-top: 1.5rem;">
+                <div class="result-grid">
+                    <div class="v3-card" style="margin-bottom: 0;">
                         <div class="v3-title">DOCUMENT ANALYSIS</div>
-                        <div id="doc-type-label" style="font-weight: 600; font-size: 1.1rem; color: var(--accent);">DETECTION...</div>
-                        <div id="doc-status-badge" style="display: inline-block; margin-top: 0.5rem; padding: 0.3rem 0.8rem; border-radius: 2rem; font-size: 0.75rem; font-weight: 700;">STATUS</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <h2 id="doc-type-label">---</h2>
+                            <span id="doc-status-badge" style="padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;">---</span>
+                        </div>
+                        <hr style="border: 0; border-top: 1px solid var(--border); margin: 1.5rem 0;">
+                        <div class="v3-title">ROOT TRANSACTION</div>
+                        <div style="font-size: 2.5rem; font-weight: 800; color: var(--text);" id="root-amount">0.00 TL</div>
+                        <div id="written-amount-label" style="font-size: 0.9rem; color: var(--text-muted); margin-top: 0.5rem">---</div>
+                        <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <i id="confirm-icon">●</i>
+                            <span style="font-size: 0.8rem; font-weight: 600;">Text Confirmation Match</span>
+                        </div>
+                    </div>
+                    <div class="v3-card" id="adjustments-container" style="margin-bottom: 0; overflow-y: auto;">
+                        <div class="v3-title">ADJUSTMENTS & BREAKDOWN</div>
                     </div>
                 </div>
 
-                <div class="analysis-card">
-                    <div class="v3-title">FINANCIAL HIERARCHY</div>
-                    
-                    <div class="v3-block root-transaction">
-                        <div class="v3-title" style="color: var(--accent);">ROOT TRANSACTION (Ana İşlem)</div>
-                        <div class="root-amount" id="root-amount">0.00</div>
-                        <div id="text-confirmation" class="text-confirmation">
-                            <i id="confirm-icon">●</i>
-                            <span id="written-amount-label">Text Confirmation...</span>
-                        </div>
+                <div class="v3-card" style="margin-top: 1.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <div class="v3-title">ENGINE TRUST SCORE</div>
+                        <div style="font-size: 1.2rem; font-weight: 800; color: var(--primary);" id="trust-score">0%</div>
                     </div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">Logic: <span id="logic-label">---</span></div>
+                </div>
 
-                    <div id="adjustments-container">
-                        <div class="v3-title">ADJUSTMENTS & SUBSIDIARY AMOUNTS (Yan İşlemler)</div>
-                        <!-- Items injected here -->
-                    </div>
-
-                    <div class="engine-report-mini">
-                        <div class="metric">
-                            <span class="metric-val" id="trust-score">0.00%</span>
-                            <span class="metric-label">TRUST SCORE</span>
-                        </div>
-                        <div class="metric">
-                            <span class="metric-val" id="logic-label" style="color: var(--accent); font-size: 1rem; margin-top: 0.2rem;">-</span>
-                            <span class="metric-label">LOGIC APPLIED</span>
-                        </div>
-                    </div>
-
-                    <div style="margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 1.5rem;">
-                        <div class="v3-title">DETAILED JSON REPORT</div>
-                        <pre id="json-output" style="background: rgba(0,0,0,0.4); padding: 1rem; border-radius: 0.75rem; font-size: 0.8rem; color: #10b981; overflow-x: auto; max-height: 400px;"></pre>
-                    </div>
+                <div class="v3-card">
+                    <div class="v3-title">STRUCTURED JSON OUTPUT</div>
+                    <pre id="json-output"></pre>
                 </div>
             </div>
-        </section>
+        </div>
+
+        <!-- Section: Dashboard -->
+        <div id="dashboard-section" style="display: none;">
+            <div class="dashboard-grid">
+                <div class="v3-card stat-card">
+                    <div class="v3-title">TOPLAM DOKÜMAN</div>
+                    <div class="stat-value" id="stat-total">0</div>
+                </div>
+                <div class="v3-card stat-card">
+                    <div class="v3-title">BAŞARI ORANI</div>
+                    <div class="stat-value" id="stat-success">0%</div>
+                </div>
+                <div class="v3-card stat-card">
+                    <div class="v3-title">ORT. İŞLEM SÜRESİ</div>
+                    <div class="stat-value" id="stat-time">0s</div>
+                </div>
+            </div>
+            <div class="v3-card">
+                <div class="v3-title">DOKÜMAN TİPİ DAĞILIMI</div>
+                <div style="height: 300px;">
+                    <canvas id="chart-docs"></canvas>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
         const fileInput = document.getElementById('file-input');
-        const dropZone = document.getElementById('drop-zone');
         const uploadBtn = document.getElementById('upload-btn');
         const resultsSection = document.getElementById('results-section');
-        const spinner = document.getElementById('spinner');
+        const spinnerIcon = document.getElementById('spinner-icon');
+        let currentJobId = null;
+        let charts = {};
 
-        dropZone.onclick = () => fileInput.click();
-        fileInput.onchange = (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => document.getElementById('image-preview').src = e.target.result;
-                reader.readAsDataURL(file);
-                dropZone.querySelector('p').innerText = file.name;
+        function getAuthHeader() {
+            const key = document.getElementById('api-key').value;
+            return { 'X-API-KEY': key };
+        }
+
+        function showTab(tab, event) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            if (tab === 'upload') {
+                document.getElementById('upload-section').style.display = 'block';
+                document.getElementById('dashboard-section').style.display = 'none';
+            } else {
+                document.getElementById('upload-section').style.display = 'none';
+                document.getElementById('dashboard-section').style.display = 'block';
+                loadDashboard();
             }
-        };
+        }
+
+        async function loadDashboard() {
+            try {
+                const res = await fetch('/analytics', { headers: getAuthHeader() });
+                if (!res.ok) return alert("Hata: API Key geçersiz veya yetkiniz yok.");
+                const data = await res.json();
+                
+                document.getElementById('stat-total').innerText = data.total_documents;
+                document.getElementById('stat-success').innerText = data.success_rate.toFixed(1) + '%';
+                document.getElementById('stat-time').innerText = data.avg_processing_time.toFixed(2) + 's';
+
+                renderCharts(data.doc_types);
+            } catch (err) { console.error(err); }
+        }
+
+        function renderCharts(docs) {
+            const ctx = document.getElementById('chart-docs').getContext('2d');
+            if (charts.docs) charts.docs.destroy();
+            
+            charts.docs = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(docs),
+                    datasets: [{
+                        label: 'İşlem Sayısı',
+                        data: Object.values(docs),
+                        backgroundColor: '#6366f1'
+                    }]
+                },
+                options: { 
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, grid: { color: '#334155' } }, x: { grid: { display: false } } }
+                }
+            });
+        }
 
         uploadBtn.onclick = async () => {
             const file = fileInput.files[0];
             if (!file) return alert("Hata: Dosya seçmediniz.");
 
-            spinner.style.display = 'block';
+            spinnerIcon.style.display = 'inline-block';
             uploadBtn.disabled = true;
             resultsSection.style.display = 'none';
 
             const mask_pii = document.getElementById('kvkk-toggle').checked;
-
             const formData = new FormData();
             formData.append('file', file);
 
             try {
-                const response = await fetch(`/process?mask_pii=${mask_pii}`, { method: 'POST', body: formData });
+                const response = await fetch(`/process?mask_pii=${mask_pii}`, { 
+                    method: 'POST', 
+                    body: formData,
+                    headers: getAuthHeader()
+                });
                 const initResult = await response.json();
 
                 if (response.ok && initResult.job_id) {
-                    // Start Polling
+                    currentJobId = initResult.job_id;
                     pollStatus(initResult.job_id);
                 } else {
-                    alert('Sistem Hatası: ' + (initResult.detail || 'İşlem başlatılamadı.'));
+                    alert('Hata: ' + (initResult.detail || 'İşlem başlatılamadı.'));
                     resetUI();
                 }
-            } catch (err) {
-                alert('Bağlantı Hatası: Lütfen sunucunun çalıştığından emin olun.');
-                resetUI();
-            }
+            } catch (err) { alert('Bağlantı Hatası'); resetUI(); }
         };
 
         async function pollStatus(jobId) {
             try {
-                const response = await fetch(`/status/${jobId}`);
+                const response = await fetch(`/status/${jobId}`, { headers: getAuthHeader() });
                 const data = await response.json();
 
                 if (data.status === 'SUCCESS') {
                     renderResult(data.result);
                     resetUI();
                 } else if (data.status === 'FAILURE') {
-                    alert('İşlem Hatası: ' + (data.error || 'Bilinmeyen bir hata oluştu.'));
+                    alert('İşlem Hatası: ' + (data.error || 'Failed'));
                     resetUI();
                 } else {
-                    // Still processing
                     setTimeout(() => pollStatus(jobId), 2000);
                 }
-            } catch (err) {
-                console.error("Polling error:", err);
-                setTimeout(() => pollStatus(jobId), 3000);
-            }
+            } catch (err) { console.error(err); }
+        }
+
+        async function exportDoc(format) {
+            if (!currentJobId) return;
+            const url = `/export/${currentJobId}?format=${format}`;
+            try {
+                const res = await fetch(url, { headers: getAuthHeader() });
+                if (!res.ok) return alert("Export failed");
+                const blob = await res.blob();
+                const link = document.createElement('a');
+                link.href = window.URL.createObjectURL(blob);
+                link.download = `export_${currentJobId}.${format === 'ubl' ? 'xml' : 'csv'}`;
+                link.click();
+            } catch (err) { alert("Download error"); }
         }
 
         function renderResult(data) {
-            const hierarchy = data.financial_hierarchy;
-            const root = hierarchy.root_transaction;
-            const report = data.engine_report;
+            const h = data.financial_hierarchy;
+            const root = h.root_transaction;
             const analysis = data.document_analysis;
 
-            // UI Updates
             document.getElementById('doc-type-label').innerText = analysis.type;
-            const statusBadge = document.getElementById('doc-status-badge');
-            statusBadge.innerText = analysis.status;
-            statusBadge.style.backgroundColor = analysis.status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)';
-            statusBadge.style.color = analysis.status === 'VERIFIED' ? 'var(--success)' : 'var(--error)';
+            const badge = document.getElementById('doc-status-badge');
+            badge.innerText = analysis.status;
+            badge.style.backgroundColor = analysis.status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+            badge.style.color = analysis.status === 'VERIFIED' ? 'var(--success)' : 'var(--error)';
 
-            document.getElementById('root-amount').innerText = root.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' TL';
-            document.getElementById('written-amount-label').innerText = root.text_confirmation;
+            document.getElementById('root-amount').innerText = (root.amount || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' TL';
+            document.getElementById('written-amount-label').innerText = root.text_confirmation || "N/A";
             document.getElementById('confirm-icon').style.color = root.is_valid ? 'var(--success)' : 'var(--warning)';
 
-            // Adjustments
             const adjContainer = document.getElementById('adjustments-container');
-            adjContainer.innerHTML = '<div class="v3-title">ADJUSTMENTS & SUBSIDIARY AMOUNTS</div>';
-            hierarchy.adjustments_and_fees.forEach(adj => {
+            adjContainer.innerHTML = '<div class="v3-title">ADJUSTMENTS & BREAKDOWN</div>';
+            (h.adjustments_and_fees || []).forEach(adj => {
                 const item = document.createElement('div');
                 item.className = 'adjustment-item';
                 item.innerHTML = `
                     <div>
-                        <div style="font-size: 0.8rem; color: var(--text-muted);">${adj.group_name}</div>
-                        <div style="font-weight: 700;">${adj.total_impact.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">${adj.group_name}</div>
+                        <div style="font-weight: 700;">${(adj.total_impact || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL</div>
                     </div>
                     <div class="math-status ${adj.math_status === 'MATCH' ? 'status-match' : 'status-mismatch'}">${adj.math_status}</div>
                 `;
                 adjContainer.appendChild(item);
             });
 
-            document.getElementById('trust-score').innerText = (report.trust_score * 100).toFixed(1) + '%';
-            document.getElementById('logic-label').innerText = report.logic_applied;
+            document.getElementById('trust-score').innerText = ((data.engine_report?.trust_score || 0) * 100).toFixed(1) + '%';
+            document.getElementById('logic-label').innerText = data.engine_report?.logic_applied || "N/A";
             document.getElementById('json-output').textContent = JSON.stringify(data, null, 2);
 
             resultsSection.style.display = 'block';
@@ -301,7 +382,7 @@
         }
 
         function resetUI() {
-            spinner.style.display = 'none';
+            spinnerIcon.style.display = 'none';
             uploadBtn.disabled = false;
         }
     </script>

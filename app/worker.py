@@ -36,11 +36,13 @@ data_extractor = DataExtractor()
 db = DatabaseClient()
 
 @celery_app.task(name="process_document_task", bind=True)
-def process_document_task(self, file_path, original_filename, mask_pii=False):
+def process_document_task(self, file_path, original_filename, mask_pii=False, key_id=None):
     """
     Background task to process a document (Image or PDF).
     """
-    logger.info(f"Starting task {self.request.id} for {original_filename} (KVKK: {mask_pii})")
+    import time
+    start_time = time.time()
+    logger.info(f"Task {self.request.id} for {original_filename} (KVKK: {mask_pii})")
     temp_images = []
     
     try:
@@ -76,7 +78,8 @@ def process_document_task(self, file_path, original_filename, mask_pii=False):
             llm_layer=llm_layer
         ))
         
-        # 5. Save to DB
+        # 5. Save to DB with extra metrics
+        duration = time.time() - start_time
         meta = extracted_data.get("document_analysis", {})
         report = extracted_data.get("engine_report", {})
         
@@ -84,17 +87,28 @@ def process_document_task(self, file_path, original_filename, mask_pii=False):
             filename=original_filename,
             doc_type=meta.get("type", "UNKNOWN"),
             trust_score=report.get("trust_score", 0.0),
-            result_dict=extracted_data
+            result_dict=extracted_data,
+            processing_time=duration,
+            key_id=key_id
         )
         
         # 6. Cleanup
         FileHandler.cleanup([file_path] + (temp_images if FileHandler.is_pdf(file_path) else []))
-        
-        logger.info(f"Task {self.request.id} completed successfully")
+        logger.info(f"Task {self.request.id} completed in {duration:.2f}s")
         return extracted_data
 
     except Exception as e:
+        duration = time.time() - start_time
         logger.exception(f"Task {self.request.id} failed: {str(e)}")
+        db.save_result(
+            filename=original_filename,
+            doc_type="FAILED",
+            trust_score=0.0,
+            result_dict={"error": str(e)},
+            processing_time=duration,
+            error_type=type(e).__name__,
+            key_id=key_id
+        )
         FileHandler.cleanup([file_path] + temp_images)
         self.update_state(state="FAILURE", meta={"error": str(e)})
         raise e

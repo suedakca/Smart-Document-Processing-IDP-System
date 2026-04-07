@@ -1,83 +1,72 @@
 from paddleocr import PaddleOCR
 import os
 import cv2
-import logging
+from loguru import logger
 from .preprocessing import ImagePreprocessor
 
 class DocumentProcessor:
     def __init__(self, lang='tr'):
-        # Removing explicit side limits to avoid version-specific argument errors
-        # Enabling angle classification for better orientation handling
-        self.ocr = PaddleOCR(use_angle_cls=True, lang=lang)
+        # Initialize PaddleOCR with angle classification
+        self.ocr = PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
         self.preprocessor = ImagePreprocessor()
-        self.logger = logging.getLogger(__name__)
 
-    def process(self, img_path):
+    def process(self, img_paths: list) -> list:
         """
-        Processes an image and returns a list of results.
-        Result format: [[bounding_box, [text, confidence]], ...]
+        Processes a list of image paths and returns flattened OCR results.
+        Result format: [{"text": "", "confidence": 0.0, "bbox": [], "page": 1}, ...]
         """
-        try:
-            if not os.path.exists(img_path):
-                raise FileNotFoundError(f"Image not found at {img_path}")
+        if isinstance(img_paths, str):
+            img_paths = [img_paths]
             
-            # 1. Preprocess image (resizes to 2500px if larger)
-            processed_img = self.preprocessor.process(img_path)
-            
-            # 2. Save processed image to a temp file for OCR
-            temp_processed_path = f"{img_path}_processed.png"
-            cv2.imwrite(temp_processed_path, processed_img)
-            
-            # 3. Perform OCR on the resized/denoised image
-            result = self.ocr.ocr(temp_processed_path)
-            # self.logger.info(f"Raw OCR result: {result}")
-            
-            # 4. Cleanup temp processed file
-            if os.path.exists(temp_processed_path):
-                os.remove(temp_processed_path)
-            
-            if not result:
-                return []
+        all_extracted_data = []
+        
+        for i, img_path in enumerate(img_paths):
+            try:
+                if not os.path.exists(img_path):
+                    logger.error(f"Image not found: {img_path}")
+                    continue
                 
-            extracted_data = []
-            
-            # Handle List[List] format (Standard PaddleOCR)
-            # Format: [[box, (text, score)], ...]
-            if isinstance(result, list) and len(result) > 0 and isinstance(result[0], list) and not isinstance(result[0][0], dict):
+                # 1. Preprocess image
+                processed_img = self.preprocessor.process(img_path)
+                
+                # 2. Save temp processed image
+                temp_processed_path = f"{img_path}_step2.png"
+                cv2.imwrite(temp_processed_path, processed_img)
+                
+                # 3. Perform OCR
+                logger.info(f"Running OCR on page {i+1}...")
+                result = self.ocr.ocr(temp_processed_path)
+                
+                # Cleanup temp file
+                if os.path.exists(temp_processed_path):
+                    os.remove(temp_processed_path)
+                
+                if not result:
+                    continue
+                
+                # Handle standard List[List] or List[Dict] formats
                 for page in result:
+                    if not page: continue
                     for line in page:
-                        if len(line) == 2:
+                        # Case: [box, (text, score)]
+                        if isinstance(line, list) and len(line) == 2:
                             box, (text, score) = line
-                            extracted_data.append({
+                            all_extracted_data.append({
                                 "text": text,
                                 "confidence": float(score),
-                                "bbox": box
+                                "bbox": box,
+                                "page": i + 1
                             })
-                return extracted_data
-
-            # Handle Dict format (PaddleX or newer versions)
-            pages = result if isinstance(result, list) else [result]
-            
-            for page in pages:
-                if isinstance(page, dict):
-                    texts = page.get("rec_texts", [])
-                    scores = page.get("rec_scores", [])
-                    boxes = page.get("dt_polys", [])
-                    
-                    for i in range(len(texts)):
-                        extracted_data.append({
-                            "text": texts[i],
-                            "confidence": float(scores[i]) if i < len(scores) else 0.0,
-                            "bbox": boxes[i] if i < len(boxes) else []
-                        })
-                elif isinstance(page, list):
-                    # Fallback for nested list without clear structure
-                    for item in page:
-                        if isinstance(item, list) and len(item) == 2:
-                            box, (text, score) = item
-                            extracted_data.append({"text": text, "confidence": float(score), "bbox": box})
+                        # Case: dict
+                        elif isinstance(line, dict):
+                            all_extracted_data.append({
+                                "text": line.get("text", ""),
+                                "confidence": float(line.get("confidence", 0.0)),
+                                "bbox": line.get("bbox", []),
+                                "page": i + 1
+                            })
+                            
+            except Exception as e:
+                logger.exception(f"OCR Error on page {i+1}: {str(e)}")
                 
-            return extracted_data
-        except Exception as e:
-            self.logger.error(f"Error during OCR processing: {str(e)}")
-            raise e
+        return all_extracted_data

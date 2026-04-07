@@ -1,6 +1,12 @@
 version: '3.8'
 
 services:
+  redis:
+    image: redis:6.2-alpine
+    ports:
+      - "6379:6379"
+    restart: always
+
   idp-api:
     build: .
     ports:
@@ -9,4 +15,35 @@ services:
       - .:/app
     environment:
       - PYTHONUNBUFFERED=1
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - LLM_API_KEY=${LLM_API_KEY}
+    depends_on:
+      - redis
+    restart: always
+
+  celery-worker:
+    build: .
+    command: celery -A app.worker.celery_app worker --loglevel=info
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - LLM_API_KEY=${LLM_API_KEY}
+    depends_on:
+      - redis
+    restart: always
+
+  celery-beat:
+    build: .
+    command: celery -A app.worker.celery_app beat --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
     restart: always

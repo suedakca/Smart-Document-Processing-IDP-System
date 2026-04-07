@@ -3,27 +3,17 @@ import shutil
 import os
 import uuid
 from fastapi.responses import HTMLResponse
-import logging
-from .preprocessing import ImagePreprocessor
-from .processor import DocumentProcessor
-from .postprocessing import DataExtractor
-from .classifier import DocumentClassifier
+from loguru import logger
 from .db_client import DatabaseClient
+from .worker import process_document_task
+from .schemas import JobStatus, ExtractionResult
+from celery.result import AsyncResult
 from dotenv import load_dotenv
-load_dotenv() 
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+load_dotenv()
 
-app = FastAPI(title="Smart IDP System", description="Intelligent Document Processing API")
-
-# Initialize processors
-preprocessor = ImagePreprocessor()
-doc_processor = DocumentProcessor()
-data_extractor = DataExtractor()
-classifier = DocumentClassifier()
+app = FastAPI(title="Smart IDP System", description="High-Performance Asynchronous IDP API")
 db = DatabaseClient()
-
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -41,57 +31,64 @@ async def get_history(limit: int = 10):
         logger.error(f"Error fetching history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/process")
+@app.post("/process", status_code=202)
 async def process_document(file: UploadFile = File(...)):
-    # 1. Save uploaded file
+    """
+    Triggers an asynchronous document processing task.
+    Returns 202 Accepted with a job_id.
+    """
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in [".png", ".jpg", ".jpeg", ".pdf"]:
+        raise HTTPException(status_code=400, detail="Unsupported file type. Use PDF or Image.")
+
     file_id = str(uuid.uuid4())
-    file_ext = os.path.splitext(file.filename)[1]
     temp_path = os.path.join(UPLOAD_DIR, f"{file_id}{file_ext}")
     
     try:
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # 2. Preprocess (Optional: PaddleOCR handles raw pretty well, but we can denoise)
-        # processed_image_path = preprocessor.process(temp_path)
+        # Trigger Background Task
+        # Note: Celery will handle the processing and DB storage
+        job = process_document_task.delay(temp_path, file.filename)
         
-        # 3. Perform OCR
-        ocr_results = doc_processor.process(temp_path)
-        
-        # 4. Classify Document
-        doc_type, doc_conf = classifier.classify(ocr_results)
-        
-        # 5. Extract and Validate Structured Data
-        extracted_data = data_extractor.extract(ocr_results, doc_type=doc_type)
-        
-        # 6. Save to Database
-        db.save_result(
-            filename=file.filename,
-            doc_type=doc_type,
-            trust_score=extracted_data["security"]["trust_score"],
-            result_dict=extracted_data
-        )
-
-        # 7. Cleanup
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        
-        return {
-            "success": True,
-            "filename": file.filename,
-            "metadata": {
-                "document_type": doc_type,
-                "classification_confidence": doc_conf,
-                "file_id": file_id
-            },
-            "extraction": extracted_data
-        }
+        return {"job_id": job.id, "status": "PENDING"}
         
     except Exception as e:
-        logger.error(f"Error processing document: {str(e)}")
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Initial processing failed: {str(e)}")
+        if os.path.exists(temp_path): os.remove(temp_path)
+        raise HTTPException(status_code=500, detail="Task submission failed.")
+
+@app.get("/status/{job_id}", response_model=JobStatus)
+async def get_status(job_id: str):
+    """
+    Returns the current status of a processing job.
+    """
+    try:
+        job = AsyncResult(job_id)
+        
+        if job.ready():
+            if job.successful():
+                return {
+                    "job_id": job_id,
+                    "status": "SUCCESS",
+                    "result": job.result
+                }
+            else:
+                return {
+                    "job_id": job_id,
+                    "status": "FAILURE",
+                    "error": str(job.result) if job.result else "Unknown task error"
+                }
+        else:
+            return {
+                "job_id": job_id,
+                "status": job.status,
+                "result": None
+            }
+    except Exception as e:
+        logger.error(f"Error checking job {job_id}: {str(e)}")
+        raise HTTPException(status_code=404, detail="Job ID not found or server error.")
 
 if __name__ == "__main__":
     import uvicorn

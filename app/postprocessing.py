@@ -1,264 +1,171 @@
 import re
+import math
 from thefuzz import fuzz, process as fuzz_process
 
 class ValidationEngine:
     @staticmethod
     def clean_financial_text(text):
-        """
-        Fixes common OCR character confusion and removes noise.
-        """
-        # Remove common currency symbols and prefix noise
+        """Standardizes numeric strings for float conversion."""
+        text = str(text) if text else ""
         text = re.sub(r'^[eE]\s*', '', text) 
-        text = text.replace('TL', '').replace('$', '').replace('€', '6')
-        
+        text = text.replace('TL', '').replace('$', '').replace('€', '6').replace('~', '')
         corrections = {
-            'E': '6', 'O': '0', 'o': '0', 'Q': '0',
-            'S': '5', 's': '5', 'Ş': '5', 'ş': '5',
-            'B': '8', 'I': '1', 'i': '1', 'l': '1', 
-            '|': '1', 'L': '1', 'G': '6', 'g': '9',
-            'Z': '2', 'z': '2', 'A': '4', 'a': '4'
+            'E': '6', 'O': '0', 'o': '0', 'B': '8', 'I': '1', 'i': '1', 'l': '1', 
+            '|': '1', 'L': '1', 'G': '6', 'g': '9', 'Z': '2', 'A': '4'
         }
         for wrong, right in corrections.items():
             text = text.replace(wrong, right)
-            
-        # Handle spaces in numbers (e.g., "250, 00" -> "250,00")
         text = re.sub(r'(\d)\s+([,.]\d)', r'\1\2', text)
         text = re.sub(r'([,.])\s+(\d)', r'\1\2', text)
-        
-        # Keep only digits and separators
-        clean = re.sub(r"[^\d.,]", "", text)
-        return clean
+        # Preserve only numbers, dots, and commas
+        return re.sub(r"[^\d.,]", "", text)
 
     @staticmethod
     def to_float(val):
         if not val: return 0.0
-        clean = ValidationEngine.clean_financial_text(str(val))
+        if isinstance(val, (int, float)): return abs(float(val))
         
+        clean = ValidationEngine.clean_financial_text(str(val))
         if not clean: return 0.0
         
-        # Logic to determine which one is the decimal separator
-        # Turkish standard: 1.250,50 (dot for thousands, comma for decimal)
-        # But OCR often swaps them or misses some.
-        
-        if "," in clean and "." in clean:
-            # If both exist, the last one is usually the decimal separator
-            dot_idx = clean.rfind('.')
-            comma_idx = clean.rfind(',')
-            if dot_idx > comma_idx:
-                # 1,250.50 format
-                clean = clean.replace(",", "")
-            else:
-                # 1.250,50 format
-                clean = clean.replace(".", "").replace(",", ".")
-        elif "," in clean:
-            # Only comma -> 250,50
-            clean = clean.replace(",", ".")
-        
+        # Guard against strings with too many dots/commas (like IBANs or doc numbers)
+        # A valid float should have at most one decimal separator after cleaning
+        if clean.count('.') + clean.count(',') > 2:
+            return 0.0
+            
         try:
-            # Remove any remaining multiple dots if OCR hallucinated
-            if clean.count('.') > 1:
-                parts = clean.split('.')
-                clean = "".join(parts[:-1]) + "." + parts[-1]
-                
-            return float(clean) if any(c.isdigit() for c in clean) else 0.0
-        except:
+            # Turkish Standard: 1.250,50
+            if clean.count(',') == 1 and '.' not in clean:
+                return abs(float(clean.replace(',', '.')))
+            if "," in clean and "." in clean:
+                dot_idx, comma_idx = clean.rfind('.'), clean.rfind(',')
+                return abs(float(clean.replace(",", ""))) if dot_idx > comma_idx else abs(float(clean.replace(".", "").replace(",", ".")))
+            
+            # Simple float conversion
+            return abs(float(clean))
+        except (ValueError, TypeError):
+            # Fail gracefully, return 0.0 instead of crashing the process
             return 0.0
 
     @staticmethod
-    def check_math(extracted_keywords):
-        """
-        Detailed math validation: Masraf + BSMV == Toplam.
-        """
-        try:
-            def to_float(val):
-                return ValidationEngine.to_float(val)
-
-            # Dynamic check based on keywords
-            # Example for Garanti/Bank receipts
-            masraf = to_float(extracted_keywords.get("fee_amount", 0))
-            bsmv = to_float(extracted_keywords.get("tax_amount", 0))
-            total = to_float(extracted_keywords.get("total_amount", 0))
-
-            if masraf > 0 and bsmv > 0 and total > 0:
-                is_valid = abs((masraf + bsmv) - total) < 0.05
-                return {
-                    "math_valid": is_valid,
-                    "check": f"{masraf} + {bsmv} == {total}",
-                    "status": "VALID" if is_valid else "MISMATCH"
-                }
-
-            return {"math_valid": True, "status": "INSUFFICIENT_DATA"}
-        except Exception as e:
-            return {"math_valid": False, "error": str(e)}
-
-    @staticmethod
-    def cross_check_text(raw_text_list, extracted_total):
-        """
-        Compares numeric total with 'written-out' total using fuzzy match for 'YALNIZ'.
-        """
-        written_total = ""
-        for line in raw_text_list:
-            if fuzz.partial_ratio("YALNIZ", line.upper()) > 75:
-                written_total = line
-                break
-        
-        return {
-            "cross_check_status": "FOUND" if written_total else "NOT_FOUND",
-            "written_line": written_total
-        }
+    def search_by_proximity(label_keywords, ocr_results, threshold=60):
+        for label_kw in label_keywords:
+            label_box = None
+            for res in ocr_results:
+                if fuzz.partial_ratio(label_kw.upper(), res["text"].upper()) > 85:
+                    label_box = res["bbox"]
+                    break
+            
+            if label_box is not None:
+                lx_center = (label_box[0][0] + label_box[2][0]) / 2
+                ly_center = (label_box[0][1] + label_box[2][1]) / 2
+                lx_end = label_box[2][0]
+                ly_end = label_box[2][1]
+                
+                candidates = []
+                for res in ocr_results:
+                    txt = res["text"]
+                    if not any(c.isdigit() for c in txt): continue
+                    
+                    rb = res["bbox"]
+                    rx_start = rb[0][0]
+                    ry_start = rb[0][1]
+                    rx_center = (rb[0][0] + rb[2][0]) / 2
+                    ry_center = (rb[0][1] + rb[2][1]) / 2
+                    
+                    dist_x = rx_start - lx_end
+                    if 0 < dist_x < 400 and abs(ry_center - ly_center) < threshold:
+                        candidates.append((dist_x, res))
+                        
+                    dist_y = ry_start - ly_end
+                    if 0 < dist_y < 150 and abs(rx_center - lx_center) < threshold:
+                        candidates.append((dist_y, res))
+                
+                if candidates:
+                    candidates.sort(key=lambda x: x[0])
+                    return candidates[0][1]["text"]
+        return None
 
 class DataExtractor:
     def __init__(self):
-        # Common patterns for Turkish invoices
-        self.patterns = {
-            "iban": r"TR\d{2}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{2}",
-            "date": r"\d{2}[./-]\d{2}[./-]\d{4}",
-            "tax_id": r"\d{10,11}"
-        }
-        # Generic amount pattern: handles dots/commas as separators and 0-3 decimal places
-        # Generic amount pattern: handles dots/commas as separators
-        self.amount_pattern = r"(\d{1,3}(?:[\s.,]\d{3})*(?:[.,]\d{1,3})?|\d+[.,]\d{1,3}|\d+)"
-        
-        # Target keywords for fuzzy matching (Semantik Mapping)
-        self.keywords = {
-            "total_amount": ["TOPLAM", "GENEL TOPLAM", "ÖDENECEK", "TOTAL", "ARA TOPLAM", "TUTAR"],
-            "tax_amount": ["KDV", "TAX", "KATMA DEĞER VERGİSİ", "TAX AMOUNT", "BSMV", "BSIV"],
-            "fee_amount": ["MASRAF", "KOMİSYON", "FEE"],
-            "invoice_no": ["FATURA NO", "FIS NO", "BELGE NO", "INVOICE NUMBER", "FİŞ NO"]
-        }
         self.validator = ValidationEngine()
+        self.label_map = {
+            "root": ["TUTAR", "TOPLAM", "TRANSFER", "ODENECEK", "GRAND TOTAL", "ISLEM TUTARI"],
+            "written": ["YALNIZ", "YALNIZCA"],
+            "fee": ["MASRAF", "KOMISYON", "ISLEM UCRETI"],
+            "tax": ["BSMV", "KDV", "TAX", "VAT"]
+        }
 
-    def _extract_patterns(self, text_lines):
-        full_text = " ".join([d["text"] for d in text_lines])
-        extracted = {}
-        
-        for key, pattern in self.patterns.items():
-            matches = re.findall(pattern, full_text, re.IGNORECASE)
-            if matches:
-                if key == "date":
-                    # Simple validation: exclude impossible dates like 44.47.1028
-                    valid_dates = []
-                    for m in matches:
-                        # Basic check: day 1-31, month 1-12
-                        parts = re.split(r'[./-]', m)
-                        if len(parts) == 3:
-                            d, m_val, y = int(parts[0]), int(parts[1]), int(parts[2])
-                            if 1 <= d <= 31 and 1 <= m_val <= 12 and 1900 <= y <= 2100:
-                                valid_dates.append(m)
-                    matches = valid_dates
-                
-                if key == "iban":
-                    matches = [m.replace(" ", "") for m in matches]
-                
-                if matches:
-                    extracted[key] = matches
-                
-        return extracted
-
-    def _fuzzy_search(self, text_lines):
-        results = {}
-        for key, aliases in self.keywords.items():
-            for i, d in enumerate(text_lines):
-                text = d["text"].upper()
-                for alias in aliases:
-                    if fuzz.partial_ratio(alias, text) > 85:
-                        # 1. Check same horizontal 'stripe' (y-axis tolerance)
-                        bbox_y = (d["bbox"][0][1] + d["bbox"][2][1]) / 2
-                        bbox_h = abs(d["bbox"][0][1] - d["bbox"][2][1])
-                        tolerance = max(bbox_h * 0.8, 30) # Dynamic tolerance
-                        
-                        potential_values = []
-                        for other_d in text_lines:
-                            other_y = (other_d["bbox"][0][1] + other_d["bbox"][2][1]) / 2
-                            # If vertically close and to the right
-                            if abs(other_y - bbox_y) < tolerance and other_d["bbox"][0][0] > d["bbox"][0][0] * 0.9:
-                                match = re.search(self.amount_pattern, other_d["text"])
-                                if match:
-                                    # Cleanup: must have at least one digit
-                                    val = match.group(0).strip()
-                                    if any(char.isdigit() for char in val):
-                                        potential_values.append((other_d["bbox"][0][0], val))
-                        
-                        if potential_values:
-                            # Sort by x-coordinate to get the one furthest to the right (usually the total)
-                            potential_values.sort(key=lambda x: x[0], reverse=True)
-                            results[key] = potential_values[0][1]
-                        else:
-                            # 2. Check area below keyword
-                            for j in range(i + 1, min(i + 5, len(text_lines))):
-                                match = re.search(self.amount_pattern, text_lines[j]["text"])
-                                if match:
-                                    results[key] = match.group(0)
-                                    break
-                        
-                        if key not in results:
-                            results[key] = text
-        return results
-
-    def _extract_roi(self, ocr_results, doc_type):
-        """
-        Template-based extraction for known document layouts.
-        Example: If it's a standard invoice, look at the bottom right for Total.
-        """
-        roi_results = {}
-        if doc_type == "invoice":
-            # Mock ROI: Look for any amount in the bottom 20% of the page
-            # This is where 'Total' usually resides
-            for d in ocr_results:
-                y_center = (d["bbox"][0][1] + d["bbox"][2][1]) / 2
-                # Assuming normalized height is not yet done, we check relative to total lines
-                if y_center > 0.8: # Bottom 20% (heuristic)
-                    match = re.search(self.amount_pattern, d["text"])
-                    if match:
-                        roi_results["bottom_zone_total"] = match.group(0)
-        return roi_results
-
-    def extract(self, ocr_results, doc_type="unknown"):
-        if not ocr_results:
-            return {}
-            
-        pattern_data = self._extract_patterns(ocr_results)
-        fuzzy_data = self._fuzzy_search(ocr_results)
-        roi_data = self._extract_roi(ocr_results, doc_type)
+    async def extract(self, ocr_results, category="UNKNOWN", llm_data=None, llm_layer=None):
         raw_texts = [d["text"] for d in ocr_results]
+        dynamic_content = llm_data.get("data", {}) if llm_data else {}
+        llm_conf = llm_data.get("confidence", 0.0) if llm_data else 0.0
         
-        # 1. Advanced Validation... (rest of the logic)
-        math_check = self.validator.check_math(fuzzy_data)
-        cross_check = self.validator.cross_check_text(raw_texts, fuzzy_data.get("total_amount"))
+        numeric_pool = []
+        for res in ocr_results:
+            val = self.validator.to_float(res["text"])
+            if val > 0.0:
+                numeric_pool.append(val)
         
-        # 2. Security & Anomaly Detection (Layout Consistency)
-        trust_score = 0.98
-        anomalies = []
+        root_candidate = self.validator.to_float(dynamic_content.get("transfer_amount", dynamic_content.get("amount", 0)))
+        if root_candidate == 0 and numeric_pool:
+            label_find = self.validator.search_by_proximity(self.label_map["root"], ocr_results)
+            if label_find:
+                root_candidate = self.validator.to_float(label_find)
+            else:
+                root_candidate = max(numeric_pool)
         
-        if math_check.get("status") == "MISMATCH":
-            trust_score -= 0.3
-            anomalies.append("Mathematical mismatch detected in amounts")
+        written_amount = dynamic_content.get("written_amount", "")
+        text_is_valid = llm_conf > 0.9 and written_amount != ""
         
-        if len(ocr_results) < 3:
-            trust_score -= 0.4
-            anomalies.append("Very low text density - possibly incomplete document")
-            
-        # Alignment check...
-        left_coords = [d["bbox"][0][0] for d in ocr_results if len(d["bbox"]) > 0]
-        if left_coords:
-            mean_left = sum(left_coords) / len(left_coords)
-            variance = sum((x - mean_left) ** 2 for x in left_coords) / len(left_coords)
-            if variance > 5000:
-                trust_score -= 0.1
-                anomalies.append("High layout variance detected")
+        residuals = [n for n in numeric_pool if abs(n - root_candidate) > 0.1]
         
+        fee_group = {"group_name": "Transaction_Fees", "total_impact": 0.0, "breakdown": {}, "math_status": "NONE"}
+        
+        if category == "BANKING":
+            ca = self.validator.to_float(dynamic_content.get("fee_amount", 0))
+            cb = self.validator.to_float(dynamic_content.get("tax_amount", 0))
+            tot = self.validator.to_float(dynamic_content.get("fee_total", 0))
+            if ca > 0 or cb > 0:
+                is_valid = abs(ca + cb - tot) < 0.05
+                fee_group.update({
+                    "total_impact": tot,
+                    "breakdown": {"base_fee": ca, "tax_bsmv": cb},
+                    "math_status": "MATCH" if is_valid else "MISMATCH"
+                })
+        elif category == "RETAIL":
+            sub = self.validator.to_float(dynamic_content.get("subtotal", 0))
+            tax = self.validator.to_float(dynamic_content.get("tax_amount", 0))
+            actual = root_candidate
+            if sub > 0:
+                is_valid = abs(sub + tax - actual) < 0.05
+                fee_group.update({
+                    "group_name": "Retail_Tax_Breakdown",
+                    "total_impact": actual,
+                    "breakdown": {"subtotal": sub, "tax_kdv": tax},
+                    "math_status": "MATCH" if is_valid else "MISMATCH"
+                })
+
+        trust_score = max(llm_conf, 0.85)
+        if text_is_valid or fee_group["math_status"] == "MATCH":
+            trust_score = 0.99 if text_is_valid and fee_group["math_status"] != "MISMATCH" else 0.97
+
         return {
-            "structured": pattern_data,
-            "detected_keywords": fuzzy_data,
-            "validation": {
-                "math": math_check,
-                "cross_reference": cross_check
+            "document_analysis": {
+                "type": f"{category}_DEKONT" if category == "BANKING" else category,
+                "status": "VERIFIED" if trust_score >= 0.98 else "REVIEW_REQUIRED"
             },
-            "roi_analysis": roi_data,
-            "security": {
-                "trust_score": max(0.1, round(trust_score, 2)),
-                "anomalies": anomalies,
-                "status": "SECURE" if trust_score > 0.8 else "REVIEW_REQUIRED"
+            "financial_hierarchy": {
+                "root_transaction": {
+                    "amount": root_candidate,
+                    "label": "TUTAR / TOTAL",
+                    "text_confirmation": written_amount if written_amount else "NOT_FOUND",
+                    "is_valid": text_is_valid
+                },
+                "adjustments_and_fees": [fee_group] if fee_group["math_status"] != "NONE" else []
             },
-            "raw_text": raw_texts
+            "engine_report": {
+                "trust_score": round(trust_score, 2),
+                "logic_applied": "Hierarchical_Validation_V3"
+            }
         }

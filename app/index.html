@@ -3,404 +3,265 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart IDP - Intelligent Document Processing</title>
+    <title>Smart IDP - Hierarchical Validation V3</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --primary: #6366f1;
             --primary-hover: #4f46e5;
-            --bg: #0f172a;
-            --glass: rgba(30, 41, 59, 0.7);
-            --text-main: #f8fafc;
+            --bg: #0b0f1a;
+            --glass: rgba(17, 24, 39, 0.8);
+            --text-main: #f1f5f9;
             --text-muted: #94a3b8;
-            --accent: #22d3ee;
+            --accent: #38bdf8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --border: rgba(255, 255, 255, 0.08);
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Outfit', sans-serif;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; }
 
         body {
-            background: radial-gradient(circle at top right, #1e1b4b, #0f172a);
+            background: radial-gradient(circle at top right, #1e1b4b, #0b0f1a);
             color: var(--text-main);
             min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 2rem;
+            display: flex; flex-direction: column; align-items: center; padding: 2rem;
         }
 
-        .container {
-            max-width: 1000px;
-            width: 100%;
+        .container { max-width: 1200px; width: 100%; }
+
+        header { text-align: center; margin-bottom: 3.5rem; }
+        h1 { font-size: 3rem; font-weight: 700; background: linear-gradient(to right, #6366f1, #38bdf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -1px; margin-bottom: 0.5rem; }
+        p.subtitle { color: var(--text-muted); font-size: 1.1rem; }
+
+        .upload-section {
+            background: var(--glass); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: 1.5rem;
+            padding: 3rem; text-align: center; margin-bottom: 3rem; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
         }
 
-        header {
-            text-align: center;
-            margin-bottom: 4rem;
-            animation: fadeIn 1s ease-out;
-        }
-
-        h1 {
-            font-size: 3rem;
-            font-weight: 700;
-            background: linear-gradient(to right, #6366f1, #22d3ee);
-            background-clip: text;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 0.5rem;
-        }
-
-        p.subtitle {
-            color: var(--text-muted);
-            font-size: 1.1rem;
-        }
-
-        .upload-card {
-            background: var(--glass);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 1.5rem;
-            padding: 3rem;
-            text-align: center;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            transition: transform 0.3s ease;
-        }
-
-        .upload-card:hover {
-            transform: translateY(-5px);
-        }
-
-        .drop-zone {
-            border: 2px dashed rgba(255, 255, 255, 0.2);
-            border-radius: 1rem;
-            padding: 4rem 2rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-
-        .drop-zone:hover, .drop-zone.active {
-            border-color: var(--primary);
-            background: rgba(99, 102, 241, 0.05);
-        }
-
-        .drop-zone i {
-            font-size: 3rem;
-            color: var(--primary);
-            margin-bottom: 1rem;
-            display: block;
-        }
-
-        input[type="file"] {
-            display: none;
-        }
+        .drop-zone { border: 2px dashed rgba(255, 255, 255, 0.1); border-radius: 1rem; padding: 3rem 2rem; cursor: pointer; transition: all 0.3s ease; }
+        .drop-zone:hover { border-color: var(--primary); background: rgba(99, 102, 241, 0.05); }
+        input[type="file"] { display: none; }
 
         .btn {
-            background: var(--primary);
-            color: white;
-            border: none;
-            padding: 1rem 2.5rem;
-            border-radius: 0.75rem;
-            font-weight: 600;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin-top: 2rem;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.4);
+            background: var(--primary); color: white; border: none; padding: 1rem 2.5rem; border-radius: 0.75rem;
+            font-weight: 600; cursor: pointer; transition: all 0.3s ease; display: inline-flex; align-items: center; gap: 0.5rem;
+            margin-top: 1.5rem; box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.4);
         }
 
-        .btn:hover {
-            background: var(--primary-hover);
-            transform: scale(1.02);
-            box-shadow: 0 20px 25px -5px rgba(99, 102, 241, 0.5);
-        }
+        .results { display: none; animation: slideUp 0.6s ease-out; }
+        .results-grid { display: grid; grid-template-columns: 350px 1fr; gap: 2rem; align-items: start; }
 
-        .results {
-            margin-top: 3rem;
-            display: none;
-            animation: slideUp 0.5s ease-out;
-        }
+        .preview-card { position: sticky; top: 2rem; }
+        .preview-img { width: 100%; border-radius: 1.25rem; border: 1px solid var(--border); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3); }
 
-        .results-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
-        }
+        .analysis-card { background: var(--glass); border: 1px solid var(--border); border-radius: 1.5rem; padding: 2rem; }
+        .hierarchy-viewer { margin-top: 1.5rem; }
 
-        .json-viewer {
-            background: #000;
-            color: #10b981;
-            padding: 1.5rem;
-            border-radius: 1rem;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 0.9rem;
-            overflow-x: auto;
-            max-height: 500px;
-            border: 1px solid rgba(16, 185, 129, 0.3);
-        }
+        .v3-block { background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .v3-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 1rem; }
 
-        .preview-img {
-            width: 100%;
-            border-radius: 1rem;
-            object-fit: contain;
-            background: #000;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
+        .root-transaction { border-left: 4px solid var(--accent); position: relative; }
+        .root-amount { font-size: 2.5rem; font-weight: 700; color: var(--text-main); line-height: 1; }
+        .text-confirmation { font-size: 0.9rem; color: var(--accent); margin-top: 0.5rem; font-style: italic; display: flex; align-items: center; gap: 0.5rem; }
 
-        .loading {
-            display: none;
-            margin-top: 2rem;
-        }
+        .adjustment-item { background: rgba(255,255,255,0.03); border-radius: 0.75rem; padding: 1rem; margin-top: 0.75rem; display: flex; justify-content: space-between; align-items: center; }
+        .math-status { font-size: 0.7rem; font-weight: 700; padding: 0.25rem 0.5rem; border-radius: 0.4rem; }
+        .status-match { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+        .status-mismatch { background: rgba(239, 68, 68, 0.12); color: var(--error); }
 
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid rgba(255, 255, 255, 0.1);
-            border-left: 4px solid var(--primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
-        }
+        .engine-report-mini { display: flex; gap: 2rem; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+        .metric { display: flex; flex-direction: column; }
+        .metric-val { font-size: 1.25rem; font-weight: 700; color: var(--success); }
+        .metric-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
 
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        .spinner { border: 3px solid rgba(255, 255, 255, 0.1); border-left-color: var(--primary); border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        @media (max-width: 768px) {
-            .results-grid { grid-template-columns: 1fr; }
-        }
+        @media (max-width: 900px) { .results-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Smart IDP</h1>
-            <p class="subtitle">PaddleOCR Destekli Akıllı Doküman İşleme Sistemi</p>
+            <h1>Smart IDP <span style="font-weight: 300; font-size: 1.5rem; opacity: 0.6;">V3.0</span></h1>
+            <p class="subtitle">Hierarchical Validation & Financial Decision Tree</p>
         </header>
 
-        <section class="upload-card">
+        <section class="upload-section">
             <div class="drop-zone" id="drop-zone">
-                <i>📄</i>
-                <p>Dosyayı buraya sürükleyin veya seçmek için tıklayın</p>
-                <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">PNG, JPG, JPEG desteklenir</p>
-                <input type="file" id="file-input" accept="image/*">
+                <i style="font-size: 3rem; display: block; margin-bottom: 1rem; color: var(--primary);">📥</i>
+                <p>Dosyayı sürükleyin veya <span style="color: var(--primary); font-weight: 700; text-decoration: underline;">tıklayın</span></p>
+                <input type="file" id="file-input" accept="image/*,.pdf">
             </div>
-            
-            <div class="loading" id="loading">
-                <div class="spinner"></div>
-                <p style="margin-top: 1rem;">Doküman işleniyor, lütfen bekleyin...</p>
-            </div>
-
-            <button class="btn" id="upload-btn">İşlemi Başlat</button>
+            <button class="btn" id="upload-btn">
+                <span>ANALİZİ BAŞLAT</span>
+                <div class="spinner" id="spinner"></div>
+            </button>
         </section>
 
         <section class="results" id="results-section">
-            <h2 style="margin-bottom: 1.5rem; color: var(--accent);">İşlem Sonuçları</h2>
             <div class="results-grid">
-                <div>
-                    <h3 style="margin-bottom: 1rem; font-size: 1rem; color: var(--text-muted);">Görüntü Önizleme</h3>
+                <div class="preview-card">
                     <img id="image-preview" class="preview-img" src="" alt="Preview">
-                    <div id="metadata-badge" style="margin-top: 1rem; padding: 1rem; background: rgba(255,255,255,0.05); border-radius: 0.5rem; display: none;">
-                        <div style="margin-bottom: 0.5rem;">
-                            <span id="doc-type-label" style="font-weight: 700; color: var(--accent);"></span>
-                            <span id="doc-conf-label" style="font-size: 0.8rem; color: var(--text-muted); margin-left: 1rem;"></span>
-                        </div>
-                        <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem;">
-                            <div style="display: flex; gap: 1rem;">
-                                <span id="math-status" style="padding: 2px 8px; border-radius: 4px;"></span>
-                                <span id="trust-score-label" style="color: var(--text-muted);"></span>
-                            </div>
-                            <div id="math-details" style="font-family: monospace; color: var(--text-muted); font-size: 0.75rem;"></div>
-                        </div>
+                    <div class="v3-block" style="margin-top: 1.5rem;">
+                        <div class="v3-title">DOCUMENT ANALYSIS</div>
+                        <div id="doc-type-label" style="font-weight: 600; font-size: 1.1rem; color: var(--accent);">DETECTION...</div>
+                        <div id="doc-status-badge" style="display: inline-block; margin-top: 0.5rem; padding: 0.3rem 0.8rem; border-radius: 2rem; font-size: 0.75rem; font-weight: 700;">STATUS</div>
                     </div>
                 </div>
-                <div>
-                    <h3 style="margin-bottom: 1rem; font-size: 1rem; color: var(--text-muted);">Yapılandırılmış Veri (JSON)</h3>
-                    <pre class="json-viewer" id="json-output"></pre>
-                </div>
-            </div>
-        </section>
 
-        <section id="history-section" style="margin-top: 4rem; width: 100%;">
-            <h2 style="margin-bottom: 1.5rem; color: var(--accent); font-size: 1.5rem;">Geçmiş İşlemler</h2>
-            <div id="history-list" style="display: grid; gap: 1rem;">
-                <!-- History items will be injected here -->
+                <div class="analysis-card">
+                    <div class="v3-title">FINANCIAL HIERARCHY</div>
+                    
+                    <div class="v3-block root-transaction">
+                        <div class="v3-title" style="color: var(--accent);">ROOT TRANSACTION (Ana İşlem)</div>
+                        <div class="root-amount" id="root-amount">0.00</div>
+                        <div id="text-confirmation" class="text-confirmation">
+                            <i id="confirm-icon">●</i>
+                            <span id="written-amount-label">Text Confirmation...</span>
+                        </div>
+                    </div>
+
+                    <div id="adjustments-container">
+                        <div class="v3-title">ADJUSTMENTS & SUBSIDIARY AMOUNTS (Yan İşlemler)</div>
+                        <!-- Items injected here -->
+                    </div>
+
+                    <div class="engine-report-mini">
+                        <div class="metric">
+                            <span class="metric-val" id="trust-score">0.00%</span>
+                            <span class="metric-label">TRUST SCORE</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-val" id="logic-label" style="color: var(--accent); font-size: 1rem; margin-top: 0.2rem;">-</span>
+                            <span class="metric-label">LOGIC APPLIED</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 1.5rem;">
+                        <div class="v3-title">DETAILED JSON REPORT</div>
+                        <pre id="json-output" style="background: rgba(0,0,0,0.4); padding: 1rem; border-radius: 0.75rem; font-size: 0.8rem; color: #10b981; overflow-x: auto; max-height: 400px;"></pre>
+                    </div>
+                </div>
             </div>
         </section>
     </div>
 
     <script>
-        const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('file-input');
+        const dropZone = document.getElementById('drop-zone');
         const uploadBtn = document.getElementById('upload-btn');
         const resultsSection = document.getElementById('results-section');
-        const imagePreview = document.getElementById('image-preview');
-        const jsonOutput = document.getElementById('json-output');
-        const loading = document.getElementById('loading');
-        const historyList = document.getElementById('history-list');
+        const spinner = document.getElementById('spinner');
 
-        let selectedFile = null;
+        dropZone.onclick = () => fileInput.click();
+        fileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => document.getElementById('image-preview').src = e.target.result;
+                reader.readAsDataURL(file);
+                dropZone.querySelector('p').innerText = file.name;
+            }
+        };
 
-        // Fetch history on load
-        window.addEventListener('DOMContentLoaded', fetchHistory);
+        uploadBtn.onclick = async () => {
+            const file = fileInput.files[0];
+            if (!file) return alert("Hata: Dosya seçmediniz.");
 
-        async function fetchHistory() {
+            spinner.style.display = 'block';
+            uploadBtn.disabled = true;
+            resultsSection.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
             try {
-                const response = await fetch('/history?limit=5');
-                const data = await response.json();
-                
-                historyList.innerHTML = '';
-                if (data.length === 0) {
-                    historyList.innerHTML = '<p style="color: var(--text-muted); text-align: center;">Henüz işlem geçmişi yok.</p>';
-                    return;
-                }
+                const response = await fetch('/process', { method: 'POST', body: formData });
+                const initResult = await response.json();
 
-                data.forEach(item => {
-                    const card = document.createElement('div');
-                    card.style.cssText = `
-                        background: var(--glass);
-                        padding: 1rem 1.5rem;
-                        border-radius: 1rem;
-                        border: 1px solid rgba(255,255,255,0.1);
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        transition: all 0.2s ease;
-                        cursor: pointer;
-                    `;
-                    card.onclick = () => showResult(JSON.parse(item.extracted_json), item.filename);
-                    
-                    card.innerHTML = `
-                        <div>
-                            <div style="font-weight: 600;">${item.filename}</div>
-                            <div style="font-size: 0.8rem; color: var(--text-muted);">${new Date(item.created_at).toLocaleString()}</div>
-                        </div>
-                        <div style="text-align: right;">
-                            <div style="font-size: 0.8rem; color: var(--accent); font-weight: 700;">${item.document_type.toUpperCase()}</div>
-                            <div style="font-size: 0.75rem; color: ${item.trust_score > 0.8 ? '#4ade80' : '#f87171'}">Güven: ${item.trust_score}</div>
-                        </div>
-                    `;
-                    historyList.appendChild(card);
-                });
-            } catch (error) {
-                console.error('History fetch error:', error);
+                if (response.ok && initResult.job_id) {
+                    // Start Polling
+                    pollStatus(initResult.job_id);
+                } else {
+                    alert('Sistem Hatası: ' + (initResult.detail || 'İşlem başlatılamadı.'));
+                    resetUI();
+                }
+            } catch (err) {
+                alert('Bağlantı Hatası: Lütfen sunucunun çalıştığından emin olun.');
+                resetUI();
+            }
+        };
+
+        async function pollStatus(jobId) {
+            try {
+                const response = await fetch(`/status/${jobId}`);
+                const data = await response.json();
+
+                if (data.status === 'SUCCESS') {
+                    renderResult(data.result);
+                    resetUI();
+                } else if (data.status === 'FAILURE') {
+                    alert('İşlem Hatası: ' + (data.error || 'Bilinmeyen bir hata oluştu.'));
+                    resetUI();
+                } else {
+                    // Still processing
+                    setTimeout(() => pollStatus(jobId), 2000);
+                }
+            } catch (err) {
+                console.error("Polling error:", err);
+                setTimeout(() => pollStatus(jobId), 3000);
             }
         }
 
-        function showResult(extraction, filename) {
-            document.getElementById('metadata-badge').style.display = 'block';
-            document.getElementById('doc-type-label').textContent = 'BELGE TÜRÜ: ' + extraction.raw_text ? 'LOADED' : 'HISTORY';
-            
-            // Note: We don't have the original image in history, so we clear it or show a placeholder
-            imagePreview.src = ''; 
-            
-            const mathEl = document.getElementById('math-status');
-            const math = extraction.validation.math;
-            mathEl.textContent = 'Matematik: ' + (math.status || 'N/A');
-            mathEl.style.background = math.math_valid ? 'rgba(0,255,0,0.1)' : 'rgba(255,0,0,0.1)';
-            mathEl.style.color = math.math_valid ? '#4ade80' : '#f87171';
-            
-            document.getElementById('math-details').textContent = math.check || '';
-            document.getElementById('trust-score-label').textContent = 'Güven Skoru: ' + extraction.security.trust_score;
+        function renderResult(data) {
+            const hierarchy = data.financial_hierarchy;
+            const root = hierarchy.root_transaction;
+            const report = data.engine_report;
+            const analysis = data.document_analysis;
 
-            jsonOutput.textContent = JSON.stringify(extraction, null, 2);
+            // UI Updates
+            document.getElementById('doc-type-label').innerText = analysis.type;
+            const statusBadge = document.getElementById('doc-status-badge');
+            statusBadge.innerText = analysis.status;
+            statusBadge.style.backgroundColor = analysis.status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+            statusBadge.style.color = analysis.status === 'VERIFIED' ? 'var(--success)' : 'var(--error)';
+
+            document.getElementById('root-amount').innerText = root.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' TL';
+            document.getElementById('written-amount-label').innerText = root.text_confirmation;
+            document.getElementById('confirm-icon').style.color = root.is_valid ? 'var(--success)' : 'var(--warning)';
+
+            // Adjustments
+            const adjContainer = document.getElementById('adjustments-container');
+            adjContainer.innerHTML = '<div class="v3-title">ADJUSTMENTS & SUBSIDIARY AMOUNTS</div>';
+            hierarchy.adjustments_and_fees.forEach(adj => {
+                const item = document.createElement('div');
+                item.className = 'adjustment-item';
+                item.innerHTML = `
+                    <div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted);">${adj.group_name}</div>
+                        <div style="font-weight: 700;">${adj.total_impact.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL</div>
+                    </div>
+                    <div class="math-status ${adj.math_status === 'MATCH' ? 'status-match' : 'status-mismatch'}">${adj.math_status}</div>
+                `;
+                adjContainer.appendChild(item);
+            });
+
+            document.getElementById('trust-score').innerText = (report.trust_score * 100).toFixed(1) + '%';
+            document.getElementById('logic-label').innerText = report.logic_applied;
+            document.getElementById('json-output').textContent = JSON.stringify(data, null, 2);
+
             resultsSection.style.display = 'block';
             resultsSection.scrollIntoView({ behavior: 'smooth' });
         }
 
-        dropZone.onclick = () => fileInput.click();
-
-        dropZone.ondragover = (e) => {
-            e.preventDefault();
-            dropZone.classList.add('active');
-        };
-
-        dropZone.ondragleave = () => dropZone.classList.remove('active');
-
-        dropZone.ondrop = (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('active');
-            if (e.dataTransfer.files.length > 0) {
-                handleFileChange(e.dataTransfer.files[0]);
-            }
-        };
-
-        fileInput.onchange = (e) => {
-            if (e.target.files.length > 0) {
-                handleFileChange(e.target.files[0]);
-            }
-        };
-
-        function handleFileChange(file) {
-            selectedFile = file;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                imagePreview.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
-            dropZone.querySelector('p').innerText = file.name;
+        function resetUI() {
+            spinner.style.display = 'none';
+            uploadBtn.disabled = false;
         }
-
-        uploadBtn.onclick = async () => {
-            if (!selectedFile) {
-                alert('Lütfen bir dosya seçin');
-                return;
-            }
-
-            loading.style.display = 'block';
-            uploadBtn.style.display = 'none';
-            resultsSection.style.display = 'none';
-
-            const formData = new FormData();
-            formData.append('file', selectedFile);
-
-            try {
-                const response = await fetch('/process', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const result = await response.json();
-                
-                if (response.ok && result.success) {
-                    // Update Metadata
-                    document.getElementById('metadata-badge').style.display = 'block';
-                    document.getElementById('doc-type-label').textContent = 'BELGE TÜRÜ: ' + result.metadata.document_type.toUpperCase();
-                    document.getElementById('doc-conf-label').textContent = 'Doğruluk: %' + (result.metadata.classification_confidence * 100).toFixed(1);
-                    
-                    // Update Security & Math
-                    const mathEl = document.getElementById('math-status');
-                    const math = result.extraction.validation.math;
-                    mathEl.textContent = 'Matematik: ' + (math.status || 'N/A');
-                    mathEl.style.background = math.math_valid ? 'rgba(0,255,0,0.1)' : 'rgba(255,0,0,0.1)';
-                    mathEl.style.color = math.math_valid ? '#4ade80' : '#f87171';
-
-                    document.getElementById('trust-score-label').textContent = 'Güven Skoru: ' + result.extraction.security.trust_score;
-
-                    jsonOutput.textContent = JSON.stringify(result.extraction, null, 2);
-                    resultsSection.style.display = 'block';
-                    
-                    // Refresh history
-                    fetchHistory();
-                } else {
-                    const errorMsg = result.detail || result.message || 'Bilinmeyen bir hata oluştu';
-                    alert('Hata: ' + errorMsg);
-                }
-            } catch (error) {
-                alert('Bir hata oluştu');
-                console.error(error);
-            } finally {
-                loading.style.display = 'none';
-                uploadBtn.style.display = 'inline-flex';
-            }
-        };
     </script>
 </body>
 </html>

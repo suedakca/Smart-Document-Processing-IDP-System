@@ -32,7 +32,7 @@ API'ye `http://localhost:8000` adresinden erişebilirsiniz.
 
 ```bash
 # Bağımlılıkları yükleyin
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Uygulamayı çalıştırın
 python3 -m app.main

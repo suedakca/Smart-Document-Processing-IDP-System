@@ -10,3 +10,7 @@ thefuzz
 python-dotenv
 pydantic
 scikit-image
+pymupdf
+celery
+redis
+loguru

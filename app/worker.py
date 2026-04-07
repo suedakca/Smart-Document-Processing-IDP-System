@@ -36,11 +36,11 @@ data_extractor = DataExtractor()
 db = DatabaseClient()
 
 @celery_app.task(name="process_document_task", bind=True)
-def process_document_task(self, file_path, original_filename):
+def process_document_task(self, file_path, original_filename, mask_pii=False):
     """
     Background task to process a document (Image or PDF).
     """
-    logger.info(f"Starting task {self.request.id} for {original_filename}")
+    logger.info(f"Starting task {self.request.id} for {original_filename} (KVKK: {mask_pii})")
     temp_images = []
     
     try:
@@ -50,8 +50,8 @@ def process_document_task(self, file_path, original_filename):
         else:
             temp_images = [file_path]
             
-        # 2. OCR Processing
-        ocr_results = doc_processor.process(temp_images)
+        # 2. Processor (OCR + TABLE)
+        ocr_results, table_md = doc_processor.process(temp_images)
         if not ocr_results:
             raise ValueError("No text extracted from document")
             
@@ -60,10 +60,14 @@ def process_document_task(self, file_path, original_filename):
         # 3. Classification
         category, _ = classifier.classify(ocr_results)
         
-        # 4. LLM & Data Extraction (Running async code in sync worker)
-        # Using a new event loop for the async calls in this thread
+        # 4. LLM & Data Extraction
         loop = asyncio.get_event_loop()
-        llm_results = loop.run_until_complete(llm_layer.extract_dynamic_json(raw_text_list))
+        llm_results = loop.run_until_complete(llm_layer.extract_dynamic_json(
+            raw_text_list, 
+            table_markdown=table_md, 
+            category=category, 
+            mask_pii=mask_pii
+        ))
         
         extracted_data = loop.run_until_complete(data_extractor.extract(
             ocr_results,

@@ -29,7 +29,6 @@ class ValidationEngine:
         if not clean: return 0.0
         
         # Guard against strings with too many dots/commas (like IBANs or doc numbers)
-        # A valid float should have at most one decimal separator after cleaning
         if clean.count('.') + clean.count(',') > 2:
             return 0.0
             
@@ -44,7 +43,6 @@ class ValidationEngine:
             # Simple float conversion
             return abs(float(clean))
         except (ValueError, TypeError):
-            # Fail gracefully, return 0.0 instead of crashing the process
             return 0.0
 
     @staticmethod
@@ -96,76 +94,50 @@ class DataExtractor:
             "tax": ["BSMV", "KDV", "TAX", "VAT"]
         }
 
+    def validate_math(self, extracted_dict: dict) -> dict:
+        """
+        Validates the mathematical consistency of extracted values.
+        """
+        hierarchy = extracted_dict.get("financial_hierarchy", {})
+        root = hierarchy.get("root_transaction", {})
+        root_amt = root.get("amount", 0.0)
+        adjustments = hierarchy.get("adjustments_and_fees", [])
+        
+        if not adjustments or root_amt == 0:
+            return extracted_dict
+
+        # Check if sub-items sum to total_impact
+        first_adj = adjustments[0]
+        adj_total = first_adj.get("total_impact", 0.0)
+        breakdown = first_adj.get("breakdown", {})
+        sub_sum = sum(breakdown.values())
+        
+        is_internal_match = abs(sub_sum - adj_total) < 0.05
+        is_root_match = abs(adj_total - root_amt) < 0.05
+        
+        if not is_root_match or not is_internal_match:
+            extracted_dict["document_analysis"]["status"] = "REVIEW_REQUIRED"
+            extracted_dict["engine_report"]["trust_score"] = min(extracted_dict["engine_report"]["trust_score"], 0.80)
+            if "math_status" not in first_adj:
+                # Add status only if missing or mismatch
+                first_adj["math_status"] = "MISMATCH"
+            extracted_dict["engine_report"]["logic_applied"] += " | Math_Mismatch_Detected"
+        else:
+            first_adj["math_status"] = "MATCH"
+            
+        return extracted_dict
+
     async def extract(self, ocr_results, category="UNKNOWN", llm_data=None, llm_layer=None):
-        raw_texts = [d["text"] for d in ocr_results]
         dynamic_content = llm_data.get("data", {}) if llm_data else {}
-        llm_conf = llm_data.get("confidence", 0.0) if llm_data else 0.0
         
-        numeric_pool = []
-        for res in ocr_results:
-            val = self.validator.to_float(res["text"])
-            if val > 0.0:
-                numeric_pool.append(val)
-        
-        root_candidate = self.validator.to_float(dynamic_content.get("transfer_amount", dynamic_content.get("amount", 0)))
-        if root_candidate == 0 and numeric_pool:
-            label_find = self.validator.search_by_proximity(self.label_map["root"], ocr_results)
-            if label_find:
-                root_candidate = self.validator.to_float(label_find)
-            else:
-                root_candidate = max(numeric_pool)
-        
-        written_amount = dynamic_content.get("written_amount", "")
-        text_is_valid = llm_conf > 0.9 and written_amount != ""
-        
-        residuals = [n for n in numeric_pool if abs(n - root_candidate) > 0.1]
-        
-        fee_group = {"group_name": "Transaction_Fees", "total_impact": 0.0, "breakdown": {}, "math_status": "NONE"}
-        
-        if category == "BANKING":
-            ca = self.validator.to_float(dynamic_content.get("fee_amount", 0))
-            cb = self.validator.to_float(dynamic_content.get("tax_amount", 0))
-            tot = self.validator.to_float(dynamic_content.get("fee_total", 0))
-            if ca > 0 or cb > 0:
-                is_valid = abs(ca + cb - tot) < 0.05
-                fee_group.update({
-                    "total_impact": tot,
-                    "breakdown": {"base_fee": ca, "tax_bsmv": cb},
-                    "math_status": "MATCH" if is_valid else "MISMATCH"
-                })
-        elif category == "RETAIL":
-            sub = self.validator.to_float(dynamic_content.get("subtotal", 0))
-            tax = self.validator.to_float(dynamic_content.get("tax_amount", 0))
-            actual = root_candidate
-            if sub > 0:
-                is_valid = abs(sub + tax - actual) < 0.05
-                fee_group.update({
-                    "group_name": "Retail_Tax_Breakdown",
-                    "total_impact": actual,
-                    "breakdown": {"subtotal": sub, "tax_kdv": tax},
-                    "math_status": "MATCH" if is_valid else "MISMATCH"
-                })
-
-        trust_score = max(llm_conf, 0.85)
-        if text_is_valid or fee_group["math_status"] == "MATCH":
-            trust_score = 0.99 if text_is_valid and fee_group["math_status"] != "MISMATCH" else 0.97
-
-        return {
-            "document_analysis": {
-                "type": f"{category}_DEKONT" if category == "BANKING" else category,
-                "status": "VERIFIED" if trust_score >= 0.98 else "REVIEW_REQUIRED"
-            },
-            "financial_hierarchy": {
-                "root_transaction": {
-                    "amount": root_candidate,
-                    "label": "TUTAR / TOTAL",
-                    "text_confirmation": written_amount if written_amount else "NOT_FOUND",
-                    "is_valid": text_is_valid
-                },
-                "adjustments_and_fees": [fee_group] if fee_group["math_status"] != "NONE" else []
-            },
-            "engine_report": {
-                "trust_score": round(trust_score, 2),
-                "logic_applied": "Hierarchical_Validation_V3"
+        if not dynamic_content:
+            return {
+                "document_analysis": {"type": category, "status": "ERROR"},
+                "financial_hierarchy": {"root_transaction": {"amount": 0.0}, "adjustments_and_fees": []},
+                "engine_report": {"trust_score": 0.0, "logic_applied": "None"}
             }
-        }
+
+        # Apply Math Validation to LLM's dynamic content
+        validated_extracted = self.validate_math(dynamic_content)
+        
+        return validated_extracted

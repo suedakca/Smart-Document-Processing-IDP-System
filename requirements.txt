@@ -14,3 +14,7 @@ pymupdf
 celery
 redis
 loguru
+jinja2
+presidio-analyzer
+presidio-anonymizer
+spacy

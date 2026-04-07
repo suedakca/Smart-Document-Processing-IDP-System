@@ -32,7 +32,7 @@ async def get_history(limit: int = 10):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/process", status_code=202)
-async def process_document(file: UploadFile = File(...)):
+async def process_document(file: UploadFile = File(...), mask_pii: bool = False):
     """
     Triggers an asynchronous document processing task.
     Returns 202 Accepted with a job_id.
@@ -50,8 +50,9 @@ async def process_document(file: UploadFile = File(...)):
         
         # Trigger Background Task
         # Note: Celery will handle the processing and DB storage
-        job = process_document_task.delay(temp_path, file.filename)
+        job = process_document_task.delay(temp_path, file.filename, mask_pii=mask_pii)
         
+        logger.info(f"Task {job.id} submitted for {file.filename} (KVKK: {mask_pii})")
         return {"job_id": job.id, "status": "PENDING"}
         
     except Exception as e:

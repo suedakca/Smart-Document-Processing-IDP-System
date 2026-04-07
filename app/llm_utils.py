@@ -4,15 +4,22 @@ import re
 from loguru import logger
 import google.generativeai as genai
 from typing import List, Dict, Any, Optional
+from jinja2 import Environment, FileSystemLoader
 from .schemas import ExtractionResult
+from .masking import PIIMasker
 
 class LLMHybridLayer:
     """
     Advanced hybrid layer using Gemini 1.5 Flash for Hierarchical Validation V3.
-    Integrated with Pydantic for strict schema enforcement.
+    Features: Jinja2 Templating, Few-Shot Learning, PII Masking (KVKK).
     """
     def __init__(self, api_key=None, model_name="gemini-1.5-flash"):
         self.api_key = api_key or os.getenv("LLM_API_KEY")
+        self.masker = PIIMasker(use_presidio=False) # Presidio requires heavy spacy models
+        
+        # Setup Jinja2
+        template_dir = os.path.join(os.path.dirname(__file__), 'templates')
+        self.jinja_env = Environment(loader=FileSystemLoader(template_dir))
         
         if self.api_key:
             try:
@@ -25,68 +32,79 @@ class LLMHybridLayer:
             self.model = None
             logger.warning("No LLM_API_KEY found. LLM features will be disabled.")
 
+    def _get_few_shot_examples(self, category: str) -> list:
+        """Returns few-shot examples based on document category."""
+        examples = {
+            "BANKING": [
+                {
+                    "input": "Para Transferi. Tutar: 1.250,00 TL. Alıcı: Ahmet Yılmaz. IBAN: TR12 0001 0002...",
+                    "output": {
+                        "document_analysis": {"type": "BANKING_DEKONT", "status": "VERIFIED"},
+                        "financial_hierarchy": {
+                            "root_transaction": {"amount": 1250.0, "label": "TUTAR", "text_confirmation": "Bin İki Yüz Elli", "is_valid": True},
+                            "adjustments_and_fees": []
+                        },
+                        "engine_report": {"trust_score": 0.99, "logic_applied": "FewShot_Match"}
+                    }
+                }
+            ]
+        }
+        return examples.get(category, [])
+
     def _clean_llm_json(self, text: str) -> str:
-        """Extracts JSON from markdown code blocks or raw text."""
-        # Try to find JSON block
         json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
-        if json_match:
-            return json_match.group(1).strip()
-        
-        # Fallback: find first { and last }
-        start = text.find('{')
-        end = text.rfind('}')
-        if start != -1 and end != -1:
-            return text[start:end+1].strip()
-            
+        if json_match: return json_match.group(1).strip()
+        start = text.find('{'); end = text.rfind('}')
+        if start != -1 and end != -1: return text[start:end+1].strip()
         return text.strip()
 
-    async def extract_dynamic_json(self, raw_text_list: List[str]) -> Dict[str, Any]:
+    async def extract_dynamic_json(self, raw_text_list: List[str], table_markdown: str = "", category: str = "UNKNOWN", mask_pii: bool = False) -> Dict[str, Any]:
         """
-        Main extraction pipeline for V3 Decision Tree.
-        Supports multi-page text aggregation and Pydantic validation.
+        Main extraction pipeline with Masking and Templating.
         """
         if not self.model:
             return {"status": "SKIPPED", "msg": "No API Key provided"}
 
         full_text = "\n".join(raw_text_list)
         
-        # Enhanced prompt for multi-page support and strict JSON output
-        extract_prompt = f"""
-        Analyze the following OCR text from a document (which may have multiple pages) and extract financial/legal data.
-        Return ONLY a JSON object matching the requested schema. Do not include any explanation.
-
-        REQUIRED FIELDS:
-        - 'document_analysis': {{'type': 'BANKING|RETAIL|ID|CONTRACT', 'status': 'VERIFIED|REVIEW_REQUIRED'}}
-        - 'financial_hierarchy': 
-            - 'root_transaction': {{'amount': float, 'label': str, 'text_confirmation': str, 'is_valid': bool}}
-            - 'adjustments_and_fees': list of {{'group_name': str, 'total_impact': float, 'breakdown': dict, 'math_status': 'MATCH|MISMATCH'}}
-        - 'engine_report': {{'trust_score': float, 'logic_applied': 'Hierarchical_Validation_V3'}}
-
-        TEXT:
-        {full_text}
-        """
+        # 1. Mask PII if requested
+        pii_mapping = {}
+        if mask_pii:
+            full_text, pii_mapping = self.masker.mask(full_text)
+            if table_markdown:
+                table_markdown, _ = self.masker.mask(table_markdown)
+        
+        # 2. Render Template
+        try:
+            template = self.jinja_env.get_template('extraction_prompt.j2')
+            prompt = template.render(
+                role="auditor",
+                category=category,
+                full_text=full_text,
+                table_markdown=table_markdown,
+                has_tables=bool(table_markdown),
+                few_shot=self._get_few_shot_examples(category)
+            )
+        except Exception as e:
+            logger.error(f"Template rendering failed: {str(e)}")
+            return {"status": "ERROR", "msg": "Prompt template error"}
 
         try:
-            # Note: Using synchronous generate_content as SDK async support varies by version.
-            # In a production environment, this should be wrapped in run_in_executor.
-            response = self.model.generate_content(extract_prompt)
+            response = self.model.generate_content(prompt)
             data_str = self._clean_llm_json(response.text)
             
-            try:
-                raw_data = json.loads(data_str)
-                # Validate with Pydantic
-                validated_data = ExtractionResult(**raw_data)
-                
-                return {
-                    "status": "SUCCESS",
-                    "data": validated_data.dict(),
-                    "confidence": validated_data.engine_report.trust_score
-                }
-            except Exception as parse_err:
-                logger.error(f"JSON Parsing/Validation Error: {str(parse_err)}")
-                logger.debug(f"Failed Data String: {data_str}")
-                return {"status": "ERROR", "msg": f"Validation failed: {str(parse_err)}"}
-
+            # 3. Unmask result (Re-identification)
+            if mask_pii and pii_mapping:
+                data_str = self.masker.unmask(data_str, pii_mapping)
+            
+            raw_data = json.loads(data_str)
+            validated = ExtractionResult(**raw_data)
+            
+            return {
+                "status": "SUCCESS",
+                "data": validated.dict(),
+                "confidence": validated.engine_report.trust_score
+            }
         except Exception as e:
-            logger.error(f"Gemini Extraction Error: {str(e)}")
+            logger.error(f"Extraction Pipeline Error: {str(e)}")
             return {"status": "ERROR", "msg": str(e)}

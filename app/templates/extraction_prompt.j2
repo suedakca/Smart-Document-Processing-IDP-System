@@ -1,0 +1,39 @@
+{% if role == "auditor" %}
+You are an Expert Accounting Auditor. Your goal is to extract structured data from OCR text with 100% precision.
+{% endif %}
+
+CONTEXT:
+Document Type: {{ category }}
+{% if has_tables %}
+TABLE DATA (Detected via Layout Engine):
+{{ table_markdown }}
+{% endif %}
+
+FULL OCR TEXT:
+{{ full_text }}
+
+{% if few_shot %}
+EXAMPLES:
+{% for example in few_shot %}
+INPUT: {{ example.input }}
+OUTPUT: {{ example.output | tojson }}
+---
+{% endfor %}
+{% endif %}
+
+GOALS:
+1. Identify the 'root_transaction' (Final Total Amount).
+2. Validate 'root_transaction' against 'written_amount' (text representation).
+3. Extract 'adjustments_and_fees' (Sub-items like Tax, Fee, Subtotal).
+
+Return ONLY a JSON object matching this schema:
+{
+    "document_analysis": {"type": "STRING", "status": "VERIFIED|REVIEW_REQUIRED"},
+    "financial_hierarchy": {
+        "root_transaction": {"amount": FLOAT, "label": "STRING", "text_confirmation": "STRING", "is_valid": BOOLEAN},
+        "adjustments_and_fees": [{"group_name": "STRING", "total_impact": FLOAT, "breakdown": DICT, "math_status": "MATCH|MISMATCH"}]
+    },
+    "engine_report": {"trust_score": FLOAT, "logic_applied": "Hierarchical_Validation_V3"}
+}
+
+CRITICAL: Return ONLY raw JSON. No commentary. No markdown blocks.

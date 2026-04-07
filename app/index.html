@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart IDP System - Corporate</title>
+    <title>Smart IDP System - Self Learning</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -34,7 +34,6 @@
             flex: 1; background: rgba(0,0,0,0.2); border: 1px solid var(--border); color: white;
             padding: 0.75rem; border-radius: 0.5rem; outline: none; transition: 0.3s;
         }
-        .auth-box input:focus { border-color: var(--primary); }
 
         /* Tabs */
         .tabs { display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid var(--border); }
@@ -46,8 +45,7 @@
 
         header { text-align: center; margin-bottom: 3rem; }
         header h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 0.5rem; }
-        header p { color: var(--text-muted); font-size: 1.1rem; }
-
+        
         .v3-card {
             background: var(--card-bg); border-radius: 1.5rem; padding: 2rem;
             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
@@ -61,26 +59,10 @@
 
         .drop-zone {
             border: 2px dashed var(--border); border-radius: 1rem; padding: 3rem;
-            text-align: center; transition: all 0.3s ease; cursor: pointer; background: rgba(255, 255, 255, 0.02);
+            text-align: center; transition: all 0.3s ease; cursor: pointer;
         }
         .drop-zone:hover { border-color: var(--primary); background: rgba(99, 102, 241, 0.05); }
         input[type="file"] { display: none; }
-
-        /* Toggle Switch */
-        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider {
-            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-            background-color: rgba(255, 255, 255, 0.1); transition: .4s;
-        }
-        .slider:before {
-            position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
-            background-color: white; transition: .4s;
-        }
-        input:checked + .slider { background-color: var(--success); }
-        input:checked + .slider:before { transform: translateX(20px); }
-        .slider.round { border-radius: 24px; }
-        .slider.round:before { border-radius: 50%; }
 
         .btn {
             background: var(--primary); color: white; border: none; padding: 1rem 2.5rem; border-radius: 0.75rem;
@@ -88,10 +70,9 @@
             width: 100%; justify-content: center; font-size: 1rem;
         }
         .btn:hover { background: var(--primary-dark); transform: translateY(-2px); }
-        .btn:disabled { background: var(--border); cursor: not-allowed; }
-
+        .btn-success { background: var(--success); }
+        .btn-success:hover { background: #059669; }
         .btn-secondary { background: rgba(255,255,255,0.1); }
-        .btn-secondary:hover { background: rgba(255,255,255,0.2); }
 
         .spinning { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -102,11 +83,23 @@
             display: flex; justify-content: space-between; align-items: center;
             padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 0.5rem; margin-bottom: 0.5rem;
         }
-        pre { background: #000; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; font-size: 0.85rem; color: #10b981; }
+        /* JSON Editor */
+        #json-output { 
+            background: #000; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; 
+            font-size: 0.85rem; color: #10b981; border: 1px solid var(--border);
+            width: 100%; min-height: 400px; resize: vertical; outline: none;
+        }
         .v3-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem; }
         .math-status { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 800; }
         .status-match { background: var(--success); color: #fff; }
         .status-mismatch { background: var(--error); color: #fff; }
+
+        /* Learning Badge */
+        .learning-badge {
+            background: rgba(99, 102, 241, 0.1); color: var(--primary);
+            padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 700;
+            border: 1px solid rgba(99, 102, 241, 0.3); display: inline-flex; align-items: center; gap: 4px;
+        }
     </style>
 </head>
 <body>
@@ -118,13 +111,13 @@
         </div>
 
         <header>
-            <h1>IDP <span style="color: var(--primary)">Core V3</span></h1>
-            <p>Faz 3: Kurumsal Hazırlık & Dashboard</p>
+            <h1>IDP <span style="color: var(--primary)">Expert V4</span></h1>
+            <p>Self-Learning & Local Model Support</p>
         </header>
 
         <div class="tabs">
             <div class="tab active" onclick="showTab('upload', event)">DOKÜMAN YÜKLE</div>
-            <div class="tab" onclick="showTab('dashboard', event)">ANALYTICS PANEL</div>
+            <div class="tab" onclick="showTab('dashboard', event)">ANALYTICS & LEARNING</div>
         </div>
 
         <!-- Section: Upload -->
@@ -137,11 +130,8 @@
                 </div>
 
                 <div style="margin: 1.5rem 0; display: flex; align-items: center; justify-content: center; gap: 0.8rem;">
-                    <label class="switch">
-                        <input type="checkbox" id="kvkk-toggle">
-                        <span class="slider round"></span>
-                    </label>
                     <span style="font-size: 0.9rem; font-weight: 500;">KVKK Modu (PII Masking)</span>
+                    <input type="checkbox" id="kvkk-toggle">
                 </div>
 
                 <button class="btn" id="upload-btn">
@@ -151,10 +141,15 @@
             </div>
 
             <div class="results" id="results-section">
-                <!-- Export Controls -->
-                <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
-                    <button class="btn btn-secondary" onclick="exportDoc('csv')">CSV EXPORT</button>
-                    <button class="btn btn-secondary" onclick="exportDoc('ubl')">UBL-TR (XML) EXPORT</button>
+                <!-- Learning Control -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <div class="learning-badge">
+                        <span>✨</span> SELF-LEARNING ACTIVE
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-secondary" style="width: auto;" onclick="exportDoc('csv')">CSV</button>
+                        <button class="btn btn-secondary" style="width: auto;" onclick="exportDoc('ubl')">UBL-XML</button>
+                    </div>
                 </div>
 
                 <div class="result-grid">
@@ -168,10 +163,6 @@
                         <div class="v3-title">ROOT TRANSACTION</div>
                         <div style="font-size: 2.5rem; font-weight: 800; color: var(--text);" id="root-amount">0.00 TL</div>
                         <div id="written-amount-label" style="font-size: 0.9rem; color: var(--text-muted); margin-top: 0.5rem">---</div>
-                        <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
-                            <i id="confirm-icon">●</i>
-                            <span style="font-size: 0.8rem; font-weight: 600;">Text Confirmation Match</span>
-                        </div>
                     </div>
                     <div class="v3-card" id="adjustments-container" style="margin-bottom: 0; overflow-y: auto;">
                         <div class="v3-title">ADJUSTMENTS & BREAKDOWN</div>
@@ -179,16 +170,12 @@
                 </div>
 
                 <div class="v3-card" style="margin-top: 1.5rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                        <div class="v3-title">ENGINE TRUST SCORE</div>
-                        <div style="font-size: 1.2rem; font-weight: 800; color: var(--primary);" id="trust-score">0%</div>
-                    </div>
-                    <div style="font-size: 0.8rem; color: var(--text-muted);">Logic: <span id="logic-label">---</span></div>
-                </div>
-
-                <div class="v3-card">
-                    <div class="v3-title">STRUCTURED JSON OUTPUT</div>
-                    <pre id="json-output"></pre>
+                    <div class="v3-title">STRUCTURED JSON EDITOR (GROUND TRUTH)</div>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">AI çıktısında hata varsa düzeltin ve "Sisteme Öğret" butonuna basın. Bu veri sistemin bir sonraki sefer aynı hatayı yapmamasını sağlayacaktır.</p>
+                    <textarea id="json-output" spellcheck="false"></textarea>
+                    <button class="btn btn-success" style="margin-top: 1rem;" id="save-correction-btn">
+                        <span>DOĞRULA VE SİSTEME ÖĞRET (LEARN)</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -197,23 +184,20 @@
         <div id="dashboard-section" style="display: none;">
             <div class="dashboard-grid">
                 <div class="v3-card stat-card">
-                    <div class="v3-title">TOPLAM DOKÜMAN</div>
+                    <div class="v3-title">TOTAL ANALYSED</div>
                     <div class="stat-value" id="stat-total">0</div>
                 </div>
                 <div class="v3-card stat-card">
-                    <div class="v3-title">BAŞARI ORANI</div>
+                    <div class="v3-title">CONFIDENCE RATE</div>
                     <div class="stat-value" id="stat-success">0%</div>
                 </div>
                 <div class="v3-card stat-card">
-                    <div class="v3-title">ORT. İŞLEM SÜRESİ</div>
-                    <div class="stat-value" id="stat-time">0s</div>
+                    <div class="v3-title">LEARNING PROGRESS</div>
+                    <div class="stat-value" style="color: var(--success);" id="stat-verified">0</div>
                 </div>
             </div>
             <div class="v3-card">
-                <div class="v3-title">DOKÜMAN TİPİ DAĞILIMI</div>
-                <div style="height: 300px;">
-                    <canvas id="chart-docs"></canvas>
-                </div>
+                <canvas id="chart-docs" height="150"></canvas>
             </div>
         </div>
     </div>
@@ -223,38 +207,30 @@
         const uploadBtn = document.getElementById('upload-btn');
         const resultsSection = document.getElementById('results-section');
         const spinnerIcon = document.getElementById('spinner-icon');
+        const saveCorrectionBtn = document.getElementById('save-correction-btn');
         let currentJobId = null;
         let charts = {};
 
         function getAuthHeader() {
             const key = document.getElementById('api-key').value;
-            return { 'X-API-KEY': key };
+            return { 'X-API-KEY': key, 'Content-Type': 'application/json' };
         }
 
         function showTab(tab, event) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             event.target.classList.add('active');
-            
-            if (tab === 'upload') {
-                document.getElementById('upload-section').style.display = 'block';
-                document.getElementById('dashboard-section').style.display = 'none';
-            } else {
-                document.getElementById('upload-section').style.display = 'none';
-                document.getElementById('dashboard-section').style.display = 'block';
-                loadDashboard();
-            }
+            document.getElementById('upload-section').style.display = tab === 'upload' ? 'block' : 'none';
+            document.getElementById('dashboard-section').style.display = tab === 'dashboard' ? 'block' : 'none';
+            if (tab === 'dashboard') loadDashboard();
         }
 
         async function loadDashboard() {
             try {
                 const res = await fetch('/analytics', { headers: getAuthHeader() });
-                if (!res.ok) return alert("Hata: API Key geçersiz veya yetkiniz yok.");
                 const data = await res.json();
-                
                 document.getElementById('stat-total').innerText = data.total_documents;
                 document.getElementById('stat-success').innerText = data.success_rate.toFixed(1) + '%';
-                document.getElementById('stat-time').innerText = data.avg_processing_time.toFixed(2) + 's';
-
+                // Success counts corrected docs in V4
                 renderCharts(data.doc_types);
             } catch (err) { console.error(err); }
         }
@@ -262,53 +238,27 @@
         function renderCharts(docs) {
             const ctx = document.getElementById('chart-docs').getContext('2d');
             if (charts.docs) charts.docs.destroy();
-            
             charts.docs = new Chart(ctx, {
                 type: 'bar',
-                data: {
-                    labels: Object.keys(docs),
-                    datasets: [{
-                        label: 'İşlem Sayısı',
-                        data: Object.values(docs),
-                        backgroundColor: '#6366f1'
-                    }]
-                },
-                options: { 
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: { y: { beginAtZero: true, grid: { color: '#334155' } }, x: { grid: { display: false } } }
-                }
+                data: { labels: Object.keys(docs), datasets: [{ label: 'Docs', data: Object.values(docs), backgroundColor: '#6366f1' }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
             });
         }
 
         uploadBtn.onclick = async () => {
             const file = fileInput.files[0];
-            if (!file) return alert("Hata: Dosya seçmediniz.");
-
+            if (!file) return alert("Dosya seçiniz.");
             spinnerIcon.style.display = 'inline-block';
             uploadBtn.disabled = true;
-            resultsSection.style.display = 'none';
-
-            const mask_pii = document.getElementById('kvkk-toggle').checked;
             const formData = new FormData();
             formData.append('file', file);
-
+            const mask_pii = document.getElementById('kvkk-toggle').checked;
             try {
                 const response = await fetch(`/process?mask_pii=${mask_pii}`, { 
-                    method: 'POST', 
-                    body: formData,
-                    headers: getAuthHeader()
+                    method: 'POST', body: formData, headers: { 'X-API-KEY': document.getElementById('api-key').value }
                 });
                 const initResult = await response.json();
-
-                if (response.ok && initResult.job_id) {
-                    currentJobId = initResult.job_id;
-                    pollStatus(initResult.job_id);
-                } else {
-                    alert('Hata: ' + (initResult.detail || 'İşlem başlatılamadı.'));
-                    resetUI();
-                }
+                if (response.ok) { currentJobId = initResult.job_id; pollStatus(initResult.job_id); }
             } catch (err) { alert('Bağlantı Hatası'); resetUI(); }
         };
 
@@ -316,75 +266,59 @@
             try {
                 const response = await fetch(`/status/${jobId}`, { headers: getAuthHeader() });
                 const data = await response.json();
-
-                if (data.status === 'SUCCESS') {
-                    renderResult(data.result);
-                    resetUI();
-                } else if (data.status === 'FAILURE') {
-                    alert('İşlem Hatası: ' + (data.error || 'Failed'));
-                    resetUI();
-                } else {
-                    setTimeout(() => pollStatus(jobId), 2000);
-                }
+                if (data.status === 'SUCCESS') { renderResult(data.result); resetUI(); } 
+                else if (data.status === 'FAILURE') { alert('Hata: ' + data.error); resetUI(); }
+                else setTimeout(() => pollStatus(jobId), 2000);
             } catch (err) { console.error(err); }
         }
+
+        saveCorrectionBtn.onclick = async () => {
+            if (!currentJobId) return;
+            const correctedData = JSON.parse(document.getElementById('json-output').value);
+            try {
+                const res = await fetch(`/correct/${currentJobId}`, {
+                    method: 'POST',
+                    headers: getAuthHeader(),
+                    body: JSON.stringify(correctedData)
+                });
+                const result = await res.json();
+                if (res.ok) alert("Sistem başaralıyla eğitildi! Gelecek benzer dokümanlarda bu düzeltme baz alınacak.");
+            } catch (err) { alert("Düzeltme kaydedilemedi."); }
+        };
 
         async function exportDoc(format) {
             if (!currentJobId) return;
             const url = `/export/${currentJobId}?format=${format}`;
-            try {
-                const res = await fetch(url, { headers: getAuthHeader() });
-                if (!res.ok) return alert("Export failed");
-                const blob = await res.blob();
-                const link = document.createElement('a');
-                link.href = window.URL.createObjectURL(blob);
-                link.download = `export_${currentJobId}.${format === 'ubl' ? 'xml' : 'csv'}`;
-                link.click();
-            } catch (err) { alert("Download error"); }
+            const res = await fetch(url, { headers: getAuthHeader() });
+            const blob = await res.blob();
+            const link = document.createElement('a');
+            link.href = window.URL.createObjectURL(blob);
+            link.download = `export_${currentJobId}.${format==='ubl'?'xml':'csv'}`;
+            link.click();
         }
 
         function renderResult(data) {
             const h = data.financial_hierarchy;
             const root = h.root_transaction;
-            const analysis = data.document_analysis;
-
-            document.getElementById('doc-type-label').innerText = analysis.type;
-            const badge = document.getElementById('doc-status-badge');
-            badge.innerText = analysis.status;
-            badge.style.backgroundColor = analysis.status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)';
-            badge.style.color = analysis.status === 'VERIFIED' ? 'var(--success)' : 'var(--error)';
-
-            document.getElementById('root-amount').innerText = (root.amount || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' TL';
+            document.getElementById('doc-type-label').innerText = data.document_analysis.type;
+            document.getElementById('root-amount').innerText = (root.amount || 0).toLocaleString('tr-TR') + ' TL';
             document.getElementById('written-amount-label').innerText = root.text_confirmation || "N/A";
-            document.getElementById('confirm-icon').style.color = root.is_valid ? 'var(--success)' : 'var(--warning)';
-
+            
             const adjContainer = document.getElementById('adjustments-container');
             adjContainer.innerHTML = '<div class="v3-title">ADJUSTMENTS & BREAKDOWN</div>';
             (h.adjustments_and_fees || []).forEach(adj => {
                 const item = document.createElement('div');
                 item.className = 'adjustment-item';
-                item.innerHTML = `
-                    <div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted);">${adj.group_name}</div>
-                        <div style="font-weight: 700;">${(adj.total_impact || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL</div>
-                    </div>
-                    <div class="math-status ${adj.math_status === 'MATCH' ? 'status-match' : 'status-mismatch'}">${adj.math_status}</div>
-                `;
+                item.innerHTML = `<div><div style="font-size: 0.7rem;">${adj.group_name}</div><b>${adj.total_impact} TL</b></div>`;
                 adjContainer.appendChild(item);
             });
 
-            document.getElementById('trust-score').innerText = ((data.engine_report?.trust_score || 0) * 100).toFixed(1) + '%';
-            document.getElementById('logic-label').innerText = data.engine_report?.logic_applied || "N/A";
-            document.getElementById('json-output').textContent = JSON.stringify(data, null, 2);
-
+            document.getElementById('json-output').value = JSON.stringify(data, null, 2);
             resultsSection.style.display = 'block';
             resultsSection.scrollIntoView({ behavior: 'smooth' });
         }
 
-        function resetUI() {
-            spinnerIcon.style.display = 'none';
-            uploadBtn.disabled = false;
-        }
+        function resetUI() { spinnerIcon.style.display = 'none'; uploadBtn.disabled = false; }
     </script>
 </body>
 </html>

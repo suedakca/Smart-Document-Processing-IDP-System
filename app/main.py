@@ -99,6 +99,20 @@ async def export_document(job_id: str, format: str = Query("csv", enum=["csv", "
         
     return FileResponse(out_file, filename=os.path.basename(out_file))
 
+@app.post("/correct/{job_id}")
+async def submit_correction(job_id: str, corrected_data: dict, key_id: int = Depends(get_api_key)):
+    """
+    Accepts human-corrected extraction data to build a learning loop.
+    This data is used as the 'Ground Truth' for future dynamic few-shot learning.
+    """
+    try:
+        db.save_correction(job_id, corrected_data)
+        logger.info(f"Human correction received for job {job_id}. Self-learning data updated.")
+        return {"status": "SUCCESS", "msg": "Correction saved. The system will learn from this."}
+    except Exception as e:
+        logger.error(f"Failed to save correction for job {job_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Could not save correction.")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

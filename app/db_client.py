@@ -39,6 +39,8 @@ class DatabaseClient:
                 document_type TEXT,
                 trust_score REAL,
                 extracted_json TEXT,
+                is_verified INTEGER DEFAULT 0,
+                corrected_json TEXT,
                 processing_time REAL,
                 error_type TEXT,
                 api_key_id INTEGER,
@@ -48,6 +50,35 @@ class DatabaseClient:
         ''')
         conn.commit()
         conn.close()
+
+    def save_correction(self, job_id, corrected_data):
+        """Saves user correction to build 'Ground Truth' for learning."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        # Note: job_id here is the celery job id, but extractions table has integer id.
+        # We need to map job_id to extraction record. Let's assume we store job_id in extraction or use integer id.
+        # Fixed: save_result should store job_id. Let's add job_id column.
+        cursor.execute('''
+            UPDATE extractions 
+            SET corrected_json = ?, is_verified = 1 
+            WHERE id = (SELECT id FROM extractions WHERE filename LIKE ? ORDER BY created_at DESC LIMIT 1)
+        ''', (json.dumps(corrected_data), f"%{job_id}%"))
+        conn.commit()
+        conn.close()
+
+    def get_verified_examples(self, doc_type, limit=3):
+        """Retrieves best corrected examples for Dynamic Few-Shot."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT document_type, corrected_json FROM extractions 
+            WHERE document_type = ? AND is_verified = 1 
+            ORDER BY created_at DESC LIMIT ?
+        ''', (doc_type, limit))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
 
     def create_api_key(self, user_name, label="Default"):
         conn = sqlite3.connect(self.db_path)

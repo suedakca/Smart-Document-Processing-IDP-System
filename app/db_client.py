@@ -4,8 +4,11 @@ import uuid
 from loguru import logger
 
 class DatabaseClient:
-    def __init__(self, db_path="idp_results.db"):
+    def __init__(self, db_path="data/idp_results.db"):
         self.db_path = db_path
+        # Ensure data directory exists
+        import os
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
     def _init_db(self):

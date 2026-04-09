@@ -38,3 +38,12 @@ build/
 # OCR / AI Models (Local cache)
 .paddlex/
 inference/
+
+# Debug and Diagnostic Files
+tests/verify_robustness.py
+tests/brute_force_ocr.py
+debug_variant_*.png
+uploads/*_robust_ocr.png
+*.png
+!frontend/*.png
+!static/*.png

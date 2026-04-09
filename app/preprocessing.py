@@ -71,21 +71,21 @@ class ImagePreprocessor:
         
         return rotated
 
+    def process_numpy(self, img):
+        if img is None:
+            return None
+            
+        # 1. Resize if too large (already handled by upscale check in processor, but good for safety)
+        img = self.resize_if_needed(img)
+        
+        # 2. Simple Grayscale
+        gray = self.grayscale(img)
+        
+        # Note: We return the grayscale version as PaddleOCR performs its own binarization.
+        return gray
+
     def process(self, image_path):
         img = cv2.imread(image_path)
         if img is None:
             raise ValueError(f"Could not read image from {image_path}")
-            
-        # 1. Resize if too large
-        img = self.resize_if_needed(img)
-        
-        # 2. Simple Grayscale (Skip aggressive contrast if not needed)
-        gray = self.grayscale(img)
-        
-        # 3. Simple threshold or CLAHE only if low contrast
-        # For now, let's use a simpler approach to avoid corrupting the image
-        processed = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-        
-        # Note: If PaddleOCR performs better with raw grayscale, we can skip thresholding.
-        # Let's return the grayscale version first as PaddleOCR has built-in binarization.
-        return gray
+        return self.process_numpy(img)

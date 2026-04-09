@@ -104,11 +104,6 @@
 </head>
 <body>
     <div class="container">
-        <!-- Auth -->
-        <div class="auth-box">
-            <span style="font-weight: 700; font-size: 0.8rem; color: var(--primary);">X-API-KEY:</span>
-            <input type="password" id="api-key" placeholder="sk_...">
-        </div>
 
         <header>
             <h1>IDP <span style="color: var(--primary)">Expert V4</span></h1>
@@ -235,8 +230,7 @@
         });
 
         function getAuthHeader() {
-            const key = document.getElementById('api-key').value;
-            return { 'X-API-KEY': key, 'Content-Type': 'application/json' };
+            return { 'Content-Type': 'application/json' };
         }
 
         function showTab(tab, event) {
@@ -317,8 +311,6 @@
         }
 
         uploadBtn.onclick = async () => {
-            const key = document.getElementById('api-key').value;
-            if (!key) return alert("Lütfen X-API-KEY alanını doldurun. (Key almak için: /setup-key?name=Admin)");
 
             const file = fileInput.files[0];
             if (!file) return alert("Lütfen bir dosya seçiniz.");
@@ -334,7 +326,7 @@
                 const response = await fetch(`/process?mask_pii=${mask_pii}`, { 
                     method: 'POST', 
                     body: formData, 
-                    headers: { 'X-API-KEY': key }
+                    headers: { }
                 });
                 
                 const initResult = await response.json();

@@ -1,3 +1,10 @@
+import os
+# Prevent Numpy/OpenCV from hanging on macOS thread pool initialization
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -36,7 +43,7 @@ async def setup_key(name: str = "Admin"):
     return {"msg": "SAVE THIS KEY. It won't be shown again.", "api_key": key}
 
 @app.get("/history")
-async def get_history(limit: int = 10, key_id: int = Depends(get_api_key)):
+async def get_history(limit: int = 10):
     try:
         return db.get_history(limit=limit)
     except Exception as e:
@@ -44,15 +51,14 @@ async def get_history(limit: int = 10, key_id: int = Depends(get_api_key)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/analytics")
-async def get_analytics(key_id: int = Depends(get_api_key)):
+async def get_analytics():
     """Returns system-wide stats for the Dashboard."""
     return db.get_stats()
 
 @app.post("/process", status_code=202)
 async def process_document(
     file: UploadFile = File(...), 
-    mask_pii: bool = False, 
-    key_id: int = Depends(check_rate_limit)
+    mask_pii: bool = False
 ):
     file_ext = os.path.splitext(file.filename)[1].lower()
     if file_ext not in [".png", ".jpg", ".jpeg", ".pdf"]:
@@ -65,8 +71,8 @@ async def process_document(
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # Pass key_id to track usage
-        job = process_document_v2.delay(temp_path, file.filename, mask_pii=mask_pii, key_id=key_id)
+        # Pass None as key_id
+        job = process_document_v2.delay(temp_path, file.filename, mask_pii=mask_pii, key_id=None)
         return {"job_id": job.id, "status": "PENDING"}
         
     except Exception as e:
@@ -75,7 +81,7 @@ async def process_document(
         raise HTTPException(status_code=500, detail="Task submission failed.")
 
 @app.get("/status/{job_id}", response_model=JobStatus)
-async def get_status(job_id: str, key_id: int = Depends(get_api_key)):
+async def get_status(job_id: str):
     """
     Check status of an extraction job.
     """
@@ -113,7 +119,7 @@ async def get_status(job_id: str, key_id: int = Depends(get_api_key)):
         return {"job_id": job_id, "status": "PENDING", "msg": "Job state unknown or pending"}
 
 @app.get("/export/{job_id}")
-async def export_document(job_id: str, format: str = Query("csv", enum=["csv", "ubl"]), key_id: int = Depends(get_api_key)):
+async def export_document(job_id: str, format: str = Query("csv", enum=["csv", "ubl"])):
     """Exports processed data to CSV or UBL-TR XML."""
     job = AsyncResult(job_id, app=celery_app)
     if not job.ready() or not job.successful():
@@ -130,7 +136,7 @@ async def export_document(job_id: str, format: str = Query("csv", enum=["csv", "
     return FileResponse(out_file, filename=os.path.basename(out_file))
 
 @app.post("/correct/{job_id}")
-async def submit_correction(job_id: str, corrected_data: dict, key_id: int = Depends(get_api_key)):
+async def submit_correction(job_id: str, corrected_data: dict):
     """
     Accepts human-corrected extraction data to build a learning loop.
     This data is used as the 'Ground Truth' for future dynamic few-shot learning.
@@ -144,12 +150,12 @@ async def submit_correction(job_id: str, corrected_data: dict, key_id: int = Dep
         raise HTTPException(status_code=500, detail="Could not save correction.")
 
 @app.get("/platform/intelligence")
-async def get_platform_intelligence(key_id: int = Depends(get_api_key)):
+async def get_platform_intelligence():
     """Returns high-level business intelligence from the platform."""
     return intel.get_platform_insights()
 
 @app.get("/platform/anomalies")
-async def get_platform_anomalies(limit: int = 5, key_id: int = Depends(get_api_key)):
+async def get_platform_anomalies(limit: int = 5):
     """Returns detected anomalies across all extractions."""
     return intel.detect_anomalies(limit=limit)
 

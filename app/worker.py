@@ -1,6 +1,12 @@
+import os
+# Prevent Numpy/OpenCV from hanging on macOS thread pool initialization
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 from dotenv import load_dotenv
 load_dotenv()
-import os
 from celery import Celery
 from celery.schedules import crontab
 from loguru import logger
@@ -104,6 +110,9 @@ def process_document_v2(self, file_path, original_filename, mask_pii=False, key_
             extracted_data = loop.run_until_complete(run_extraction())
 
         logger.info("[STEP 4] LLM Extraction completed.")
+        
+        # Construct full_text for the database
+        full_text = " ".join(raw_text_list)
         
         # 5. Save to DB with extra metrics
         duration = time.time() - start_time

@@ -28,7 +28,18 @@ GOALS:
 
 Return ONLY a JSON object matching this schema:
 {
-    "document_analysis": {"type": "STRING", "status": "VERIFIED|REVIEW_REQUIRED"},
+    "document_analysis": {
+        "type": "STRING", 
+        "status": "VERIFIED|REVIEW_REQUIRED",
+        "sender": "FULL_NAME",
+        "receiver": "FULL_NAME",
+        "description": "REASON_FOR_TRANSFER",
+        "currency": "CURRENCY_CODE",
+        "transaction_id": "REFERENCE_NUMBER",
+        "transaction_date": "YYYY-MM-DD",
+        "sender_iban": "IBAN_FULL",
+        "receiver_iban": "IBAN_FULL"
+    },
     "financial_hierarchy": {
         "root_transaction": {"amount": FLOAT, "label": "STRING", "text_confirmation": "STRING", "is_valid": BOOLEAN},
         "adjustments_and_fees": [{"group_name": "STRING", "total_impact": FLOAT, "breakdown": DICT, "math_status": "MATCH|MISMATCH"}]

@@ -94,6 +94,68 @@
         .status-match { background: var(--success); color: #fff; }
         .status-mismatch { background: var(--error); color: #fff; }
 
+        .chart-container {
+            position: relative;
+            height: 350px;
+            width: 100%;
+            margin-top: 1rem;
+        }
+
+        .scroll-container {
+            max-height: 350px;
+            overflow-y: auto;
+            padding-right: 0.5rem;
+        }
+        .scroll-container::-webkit-scrollbar { width: 4px; }
+        .scroll-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+        /* View Toggle */
+        .view-switcher {
+            display: flex; background: rgba(0,0,0,0.2); border-radius: 2rem; padding: 4px;
+            margin-bottom: 2rem; width: fit-content; border: 1px solid var(--border);
+        }
+        .view-btn {
+            background: transparent; color: var(--text-muted); border: none;
+            padding: 8px 16px; border-radius: 1.5rem; font-size: 0.75rem; font-weight: 700;
+            cursor: pointer; transition: 0.3s;
+        }
+        .view-btn.active { background: var(--primary); color: white; }
+
+        /* Decision Card */
+        .decision-card {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(0,0,0,0));
+            border: 1px solid var(--primary); border-radius: 1rem; padding: 1.5rem;
+            margin-bottom: 2rem; display: flex; align-items: center; gap: 1.5rem;
+            animation: fadeIn 0.5s ease-out;
+        }
+        .decision-icon { font-size: 2.5rem; }
+        .decision-info { flex: 1; }
+        .decision-info h3 { font-size: 1.25rem; font-weight: 800; margin-bottom: 0.25rem; }
+        .decision-info p { font-size: 0.85rem; color: var(--text-muted); }
+        .risk-meter { height: 6px; background: rgba(0,0,0,0.3); border-radius: 10px; margin-top: 1rem; overflow: hidden; }
+        .risk-bar { height: 100%; transition: width 1s ease-in-out; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Results Toggle Panels */
+        #summary-view, #raw-view { transition: 0.3s; }
+
+        .info-row {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            padding: 0.75rem 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.85rem;
+        }
+        .info-label { color: var(--text-muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+        .info-value { text-align: right; font-weight: 600; color: var(--text); max-width: 60%; }
+        
+        .tag {
+            padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700;
+            background: rgba(255,255,255,0.1); color: var(--text-muted);
+        }
+        .tag-success { background: rgba(16, 185, 129, 0.1); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.2); }
+        .tag-warning { background: rgba(245, 158, 11, 0.1); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.2); }
+        .tag-error { background: rgba(239, 68, 68, 0.1); color: var(--error); border: 1px solid rgba(239, 68, 68, 0.2); }
+
         /* Learning Badge */
         .learning-badge {
             background: rgba(99, 102, 241, 0.1); color: var(--primary);
@@ -107,7 +169,7 @@
 
         <header>
             <h1>IDP <span style="color: var(--primary)">Expert V4</span></h1>
-            <p>Self-Learning & Local Model Support</p>
+            <p>Enterprise Document Intelligence & Decisioning</p>
         </header>
 
         <div class="tabs">
@@ -137,39 +199,100 @@
 
             <div class="results" id="results-section">
                 <!-- Learning Control -->
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                    <div class="learning-badge">
-                        <span>✨</span> SELF-LEARNING ACTIVE
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <div class="view-switcher">
+                        <button class="view-btn active" onclick="switchView('summary')">KARAR DASHBOARD'U</button>
+                        <button class="view-btn" onclick="switchView('raw')">HAM JSON (DEBUG)</button>
                     </div>
                     <div style="display: flex; gap: 0.5rem;">
-                        <button class="btn btn-secondary" style="width: auto;" onclick="exportDoc('csv')">CSV</button>
-                        <button class="btn btn-secondary" style="width: auto;" onclick="exportDoc('ubl')">UBL-XML</button>
+                        <button class="btn btn-secondary" style="width: auto; padding: 0.5rem 1rem;" onclick="exportDoc('csv')">CSV</button>
+                        <button class="btn btn-secondary" style="width: auto; padding: 0.5rem 1rem;" onclick="exportDoc('ubl')">XML</button>
                     </div>
                 </div>
 
-                <div class="result-grid">
-                    <div class="v3-card" style="margin-bottom: 0;">
-                        <div class="v3-title">DOCUMENT ANALYSIS</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <h2 id="doc-type-label">---</h2>
-                            <span id="doc-status-badge" style="padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;">---</span>
+                <!-- View 1: Summary Dashboard -->
+                <div id="summary-view">
+                    <!-- Decision Banner -->
+                    <div class="decision-card" id="decision-banner">
+                        <div class="decision-icon" id="decision-icon">🤔</div>
+                        <div class="decision-info">
+                            <p style="text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.1em; margin-bottom: 2px;">Sistem Kararı / Tavsiyesi</p>
+                            <h3 id="decision-action">BELGE ANALİZ EDİLİYOR...</h3>
+                            <p id="decision-reason-text">Veriler ve riskler değerlendiriliyor.</p>
+                            <div class="risk-meter"><div class="risk-bar" id="risk-bar" style="width: 0%; background: var(--primary);"></div></div>
                         </div>
-                        <hr style="border: 0; border-top: 1px solid var(--border); margin: 1.5rem 0;">
-                        <div class="v3-title">ROOT TRANSACTION</div>
-                        <div style="font-size: 2.5rem; font-weight: 800; color: var(--text);" id="root-amount">0.00 TL</div>
-                        <div id="written-amount-label" style="font-size: 0.9rem; color: var(--text-muted); margin-top: 0.5rem">---</div>
                     </div>
-                    <div class="v3-card" id="adjustments-container" style="margin-bottom: 0; overflow-y: auto;">
+
+                    <div class="result-grid">
+                        <div class="v3-card" style="margin-bottom: 0;">
+                            <div class="v3-title">DOCUMENT ANALYSIS</div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                <h2 id="doc-type-label">---</h2>
+                                <span id="doc-status-badge" style="padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;">---</span>
+                            </div>
+                            
+                            <div class="info-row">
+                                <span class="info-label">GÖNDERİCİ (SENDER)</span>
+                                <span class="info-value" id="doc-sender">---</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">GÖNDERİCİ IBAN</span>
+                                <span class="info-value" id="doc-sender-iban" style="font-size: 0.7rem;">---</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">ALICI (RECEIVER)</span>
+                                <span class="info-value" id="doc-receiver">---</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">ALICI IBAN</span>
+                                <span class="info-value" id="doc-receiver-iban" style="font-size: 0.7rem;">---</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">REFERANS NO / TARİH</span>
+                                <span class="info-value"><span id="doc-txid">---</span> / <span id="doc-date">---</span></span>
+                            </div>
+                            <div class="info-row" style="border-bottom: none;">
+                                <span class="info-label">PARA BİRİMİ</span>
+                                <span class="tag" id="doc-currency">TRY</span>
+                            </div>
+
+                            <hr style="border: 0; border-top: 1px solid var(--border); margin: 1rem 0;">
+                            <div class="v3-title">ROOT TRANSACTION</div>
+                            <div style="font-size: 2.5rem; font-weight: 800; color: var(--text);" id="root-amount">0.00 TL</div>
+                            <div id="written-amount-label" style="font-size: 0.9rem; color: var(--text-muted); margin-top: 0.5rem">---</div>
+                        </div>
+                        <div class="v3-card" style="margin-bottom: 0; display: flex; flex-direction: column;">
+                            <div class="v3-title">VALIDATION INSIGHTS</div>
+                            <div id="validation-checks-container" style="flex: 1; overflow-y: auto;">
+                                <!-- Checks will be injected here -->
+                            </div>
+                            <div style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-muted);">
+                                <span>İŞLEM SÜRESİ: <b id="stat-time">0.0s</b></span>
+                                <span>OCR GÜVEN: <b id="stat-ocr-conf">0%</b></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="v3-card" id="adjustments-container" style="margin-top: 1.5rem;">
                         <div class="v3-title">ADJUSTMENTS & BREAKDOWN</div>
                     </div>
                 </div>
 
+                <!-- View 2: Raw Debug View -->
+                <div id="raw-view" style="display: none;">
+                    <div class="v3-card" style="margin-top: 0;">
+                        <div class="v3-title">STRUCTURED JSON OUTPUT (AUDIT READY)</div>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">Bu veri, karar motoruna ve downstream sistemlere gönderilen ham sonuçtur.</p>
+                        <textarea id="json-output" spellcheck="false" style="min-height: 500px;"></textarea>
+                    </div>
+                </div>
+
+                <!-- Ground Truth Control -->
                 <div class="v3-card" style="margin-top: 1.5rem;">
-                    <div class="v3-title">STRUCTURED JSON EDITOR (GROUND TRUTH)</div>
-                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">AI çıktısında hata varsa düzeltin ve "Sisteme Öğret" butonuna basın. Bu veri sistemin bir sonraki sefer aynı hatayı yapmamasını sağlayacaktır.</p>
-                    <textarea id="json-output" spellcheck="false"></textarea>
-                    <button class="btn btn-success" style="margin-top: 1rem;" id="save-correction-btn">
-                        <span>DOĞRULA VE SİSTEME ÖĞRET (LEARN)</span>
+                    <div class="v3-title">HUMAN-IN-THE-LOOP (LEARNING LOOP)</div>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">Öğrenme döngüsünü beslemek için veriyi onaylayın veya düzeltin.</p>
+                    <button class="btn btn-success" id="save-correction-btn">
+                        <span>DOĞRULA VE SİSTEME ÖĞRET (APPROVE)</span>
                     </button>
                 </div>
             </div>
@@ -198,11 +321,13 @@
             <div class="result-grid">
                 <div class="v3-card" style="margin-bottom: 0;">
                     <div class="v3-title">DOCUMENT DISTRIBUTION</div>
-                    <canvas id="chart-docs" height="200"></canvas>
+                    <div class="chart-container">
+                        <canvas id="chart-docs"></canvas>
+                    </div>
                 </div>
-                <div class="v3-card" id="anomaly-container" style="margin-bottom: 0; overflow-y: auto;">
+                <div class="v3-card" style="margin-bottom: 0;">
                     <div class="v3-title">ACTIVE ANOMALIES & ALERTS</div>
-                    <div id="anomaly-list">
+                    <div id="anomaly-list" class="scroll-container">
                         <!-- Anomalies will be injected here -->
                     </div>
                 </div>
@@ -378,19 +503,104 @@
             link.click();
         }
 
-        function renderResult(data) {
-            const h = data.financial_hierarchy;
-            const root = h.root_transaction;
-            document.getElementById('doc-type-label').innerText = data.document_analysis.type;
-            document.getElementById('root-amount').innerText = (root.amount || 0).toLocaleString('tr-TR') + ' TL';
-            document.getElementById('written-amount-label').innerText = root.text_confirmation || "N/A";
+        function switchView(view) {
+            const summary = document.getElementById('summary-view');
+            const raw = document.getElementById('raw-view');
+            const btns = document.querySelectorAll('.view-btn');
             
+            if (view === 'summary') {
+                summary.style.display = 'block';
+                raw.style.display = 'none';
+                btns[0].classList.add('active');
+                btns[1].classList.remove('active');
+            } else {
+                summary.style.display = 'none';
+                raw.style.display = 'block';
+                btns[0].classList.remove('active');
+                btns[1].classList.add('active');
+            }
+        }
+
+        function renderResult(data) {
+            if (!data) return;
+            
+            // Nested extraction data from PipelineResult.data
+            const extraction = data.data || {};
+            const h = extraction.financial_hierarchy || {};
+            const root = h.root_transaction || {};
+            const analysis = extraction.document_analysis || {};
+            const decision = extraction.decision_engine || data.decision_engine || {};
+            
+            // 1. Populate Decision Banner
+            const banner = document.getElementById('decision-banner');
+            const action = document.getElementById('decision-action');
+            const reason = document.getElementById('decision-reason-text');
+            const icon = document.getElementById('decision-icon');
+            const riskBar = document.getElementById('risk-bar');
+
+            const decisionMap = {
+                'AUTO_BOOK': { icon: '✅', label: 'OTOMATİK MUHASEBELEŞTİR (AUTO-BOOK)', color: 'var(--success)', desc: 'Tam güven ile onaylandı.' },
+                'AUTO_APPROVE': { icon: '✨', label: 'OTOMATİK ONAY (AUTO-APPROVE)', color: 'var(--primary)', desc: 'Doğrulama başarılı, manuel kontrol gerekmiyor.' },
+                'REVIEW_REQUIRED': { icon: '🔍', label: 'İNCELEME GEREKİYOR', color: 'var(--warning)', desc: 'Orta düzey risk veya şüpheli alan tespit edildi.' },
+                'ESCALATE': { icon: '⚠️', label: 'ÜST BİRİME İLETİLDİ (ESCALATE)', color: 'var(--error)', desc: 'Yüksek tutar veya matematiksel tutarsızlık.' },
+                'REJECT': { icon: '🚫', label: 'REDDEDİLDİ (REJECT)', color: 'var(--error)', desc: 'Belge okunamaz veya finansal veri eksik.' }
+            };
+
+            const config = decisionMap[decision.recommended_action] || decisionMap['REVIEW_REQUIRED'];
+            action.innerText = config.label;
+            action.style.color = config.color;
+            icon.innerText = config.icon;
+            banner.style.borderColor = config.color;
+            reason.innerText = (decision.decision_reason || []).join(' | ') || config.desc;
+            
+            const riskValue = (decision.risk_score || 0) * 100;
+            riskBar.style.width = riskValue + '%';
+            riskBar.style.background = riskValue > 70 ? 'var(--error)' : (riskValue > 30 ? 'var(--warning)' : 'var(--success)');
+
+            // 2. Populate Analysis Details
+            document.getElementById('doc-type-label').innerText = analysis.type?.value || "UNKNOWN";
+            document.getElementById('doc-sender').innerText = analysis.sender?.value || "BELİRTİLMEMİŞ";
+            document.getElementById('doc-sender-iban').innerText = analysis.sender_iban?.value || "---";
+            document.getElementById('doc-receiver').innerText = analysis.receiver?.value || "BELİRTİLMEMİŞ";
+            document.getElementById('doc-receiver-iban').innerText = analysis.receiver_iban?.value || "---";
+            document.getElementById('doc-txid').innerText = analysis.transaction_id?.value || "---";
+            document.getElementById('doc-date').innerText = analysis.transaction_date?.value || "---";
+            document.getElementById('doc-currency').innerText = analysis.currency?.value || "TRY";
+            
+            const badge = document.getElementById('doc-status-badge');
+            badge.innerText = analysis.status?.value || "PARTIAL";
+            badge.className = (analysis.status?.value === 'VERIFIED' || analysis.status?.value === 'SUCCESS') ? 'status-match' : 'status-mismatch';
+
+            document.getElementById('root-amount').innerText = (root.amount?.value || 0).toLocaleString('tr-TR') + ' ' + (analysis.currency?.value || 'TL');
+            document.getElementById('written-amount-label').innerText = root.text_confirmation?.value || "Yazılı onay bulunamadı";
+            
+            // 3. Validation Insights
+            const checksContainer = document.getElementById('validation-checks-container');
+            checksContainer.innerHTML = '';
+            const report = data.validation_report || {};
+            (report.checks || []).forEach(check => {
+                const row = document.createElement('div');
+                row.className = 'info-row';
+                const statusClass = check.status === 'PASS' ? 'tag-success' : (check.status === 'WARNING' ? 'tag-warning' : 'tag-error');
+                row.innerHTML = `
+                    <span class="info-label">${check.name}</span>
+                    <span class="tag ${statusClass}">${check.status}</span>
+                `;
+                checksContainer.appendChild(row);
+            });
+
+            // 4. Metrics
+            document.getElementById('stat-time').innerText = (data.processing_time || 0).toFixed(1) + 's';
+            document.getElementById('stat-ocr-conf').innerText = ((data.overall_trust_score || 0) * 100).toFixed(0) + '%';
+
             const adjContainer = document.getElementById('adjustments-container');
             adjContainer.innerHTML = '<div class="v3-title">ADJUSTMENTS & BREAKDOWN</div>';
             (h.adjustments_and_fees || []).forEach(adj => {
                 const item = document.createElement('div');
                 item.className = 'adjustment-item';
-                item.innerHTML = `<div><div style="font-size: 0.7rem;">${adj.group_name}</div><b>${adj.total_impact} TL</b></div>`;
+                const name = adj.group_name?.value || "FEE";
+                const total = adj.total_impact?.value || 0;
+                item.innerHTML = `<div><div style="font-size: 0.7rem;">${name}</div><b>${total.toLocaleString('tr-TR')} TL</b></div>`;
                 adjContainer.appendChild(item);
             });
 

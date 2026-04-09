@@ -1,8 +1,8 @@
 import os
 import json
 import re
+import httpx
 from loguru import logger
-import google.generativeai as genai
 from typing import List, Dict, Any, Optional
 from jinja2 import Environment, FileSystemLoader
 from .schemas import ExtractionResult
@@ -11,12 +11,13 @@ from .db_client import DatabaseClient
 
 class LLMHybridLayer:
     """
-    Advanced hybrid layer using Gemini 1.5 Flash for Hierarchical Validation V3.
-    Features: Jinja2 Templating, Few-Shot Learning, PII Masking (KVKK).
+    Advanced hybrid layer using direct Gemini 1.5 Flash REST v1 API.
+    Bypasses SDK versioning issues for production stability.
     """
     def __init__(self, api_key=None, model_name=None):
         self.provider = os.getenv("LLM_PROVIDER", "GEMINI")
-        self.model_name = model_name or os.getenv("LLM_MODEL", "gemini-1.5-flash")
+        # Support for the newest, high-performance 2.5 flash model
+        self.model_name = model_name or os.getenv("LLM_MODEL", "gemini-2.5-flash")
         self.api_key = api_key or os.getenv("LLM_API_KEY")
         self.db = DatabaseClient()
         self.masker = PIIMasker(use_presidio=False)
@@ -25,14 +26,12 @@ class LLMHybridLayer:
         template_dir = os.path.join(os.path.dirname(__file__), 'templates')
         self.jinja_env = Environment(loader=FileSystemLoader(template_dir))
         
-        if self.provider == "GEMINI" and self.api_key:
-            # Force stable v1 configuration
-            genai.configure(api_key=self.api_key, transport='rest')
-            # Some SDK versions auto-prefix 'models/', 
-            # we use the name directly to let the SDK handle the best versioning
-            self.model = genai.GenerativeModel(model_name=self.model_name.replace("models/", ""))
+        # Base REST URL for Gemini v1 Stable
+        self.gemini_url = f"https://generativelanguage.googleapis.com/v1/models/{self.model_name}:generateContent?key={self.api_key}"
+        
+        if self.provider == "GEMINI":
+            logger.info(f"LLM initialized: Gemini v1 REST ({self.model_name})")
         elif self.provider == "LOCAL":
-            # Support for Ollama / vLLM via OpenAI Compatible Libs
             from openai import OpenAI
             self.model = OpenAI(
                 base_url=os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1"),
@@ -40,33 +39,34 @@ class LLMHybridLayer:
             )
             logger.info(f"Local LLM initialized: {self.model_name}")
         else:
-            self.model = None
             logger.warning("No LLM provider configured.")
 
     def probe_model(self) -> dict:
-        """
-        Performs a real 'Active Probe' with a 5s timeout to verify credentials.
-        """
-        if not self.model: return {"status": "OFFLINE", "msg": "No model"}
+        """Performs a real 'Active Probe' via REST to verify credentials with retries."""
+        if self.provider != "GEMINI":
+             return {"status": "ONLINE", "msg": "Provider check skipped (Non-Gemini)"}
         
-        try:
-            import signal
-            # Use short timeout for startup probe
-            if self.provider == "GEMINI":
-                # Note: google-generativeai doesn't support timeout in some versions,
-                # we wrap it or just rely on a lightweight call.
-                response = self.model.generate_content("hi", generation_config={"max_output_tokens": 1})
-                if response:
-                    return {"status": "ONLINE", "msg": "Probe successful"}
-            else:
-                # OpenAI Probe
-                self.model.models.list()
-                return {"status": "ONLINE", "msg": "Probe successful"}
-        except Exception as e:
-            logger.warning(f"LLM Probe failed: {str(e)}")
-            return {"status": "DEGRADED", "msg": str(e)}
-        
-        return {"status": "UNKNOWN", "msg": "Could not verify"}
+        import time
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                payload = {"contents": [{"parts": [{"text": "hi"}]}], "generationConfig": {"maxOutputTokens": 1}}
+                with httpx.Client(timeout=10.0) as client:
+                    res = client.post(self.gemini_url, json=payload)
+                    if res.status_code == 200:
+                        return {"status": "ONLINE", "msg": "v1 REST Probe successful"}
+                    elif res.status_code in [429, 503] and attempt < max_retries - 1:
+                        time.sleep(2)
+                        continue
+                    else:
+                        return {"status": "DEGRADED", "msg": f"HTTP {res.status_code}: {res.text}"}
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+                logger.warning(f"LLM Probe failed: {str(e)}")
+                return {"status": "DEGRADED", "msg": str(e)}
+        return {"status": "DEGRADED", "msg": "Exhausted retries"}
 
     async def _get_dynamic_few_shot(self, category: str) -> list:
         """Fetches human-verified examples from DB for Self-Learning."""
@@ -74,7 +74,6 @@ class LLMHybridLayer:
             db_examples = self.db.get_verified_examples(category, limit=3)
             formatted = []
             for ex in db_examples:
-                # Use real raw_text as the input for the few-shot pair
                 formatted.append({
                     "input": ex["raw_text"] if ex["raw_text"] else "SAMPLE_DOC_TEXT",
                     "output": json.loads(ex["corrected_json"])
@@ -88,9 +87,16 @@ class LLMHybridLayer:
         examples = {
             "BANKING": [
                 {
-                    "input": "Para Transferi. Tutar: 1.250,00 TL. Alıcı: Ahmet Yılmaz. IBAN: TR12 0001 0002...",
+                    "input": "Para Transferi. Tarih: 22.08.2018. Ref No: 987654321. Tutar: 1.250,00 TL. Alıcı: Ahmet Yılmaz. IBAN: TR12 0001 0002...",
                     "output": {
-                        "document_analysis": {"type": "BANKING_DEKONT", "status": "VERIFIED"},
+                        "document_analysis": {
+                            "type": "BANKING_DEKONT", 
+                            "status": "VERIFIED",
+                            "transaction_id": "987654321",
+                            "transaction_date": "2018-08-22",
+                            "receiver_iban": "TR1200010002...",
+                            "currency": "TRY"
+                        },
                         "financial_hierarchy": {
                             "root_transaction": {"amount": 1250.0, "label": "TUTAR", "text_confirmation": "Bin İki Yüz Elli", "is_valid": True},
                             "adjustments_and_fees": []
@@ -110,8 +116,6 @@ class LLMHybridLayer:
         return text.strip()
 
     async def extract_dynamic_json(self, raw_text_list: List[str], table_markdown: str = "", category: str = "UNKNOWN", mask_pii: bool = False) -> Dict[str, Any]:
-        if not self.model: return {"status": "SKIPPED", "msg": "No model configured"}
-
         full_text = "\n".join(raw_text_list)
         
         # 1. Mask PII
@@ -121,7 +125,7 @@ class LLMHybridLayer:
             if table_markdown:
                 table_markdown, _ = self.masker.mask(table_markdown)
         
-        # 2. Build Hybrid Few-Shot (Static + DB Verified)
+        # 2. Build Hybrid Few-Shot
         static_examples = self._get_static_few_shot(category)
         dynamic_examples = await self._get_dynamic_few_shot(category)
         all_examples = static_examples + dynamic_examples
@@ -141,31 +145,63 @@ class LLMHybridLayer:
             logger.error(f"Template rendering failed: {str(e)}")
             return {"status": "ERROR", "msg": "Prompt template error"}
 
-        # 4. Generate Content
-        try:
-            if self.provider == "GEMINI":
-                response = self.model.generate_content(prompt)
-                data_str = response.text
-            else:
-                # OpenAI/Local Provider
-                response = self.model.chat.completions.create(
-                    model=self.model_name,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                data_str = response.choices[0].message.content
+        # 4. Generate Content via REST with Exponential Backoff
+        max_retries = 5
+        retry_delay = 2.0  # seconds
+        import random
+        import asyncio
+        
+        for attempt in range(max_retries):
+            try:
+                if self.provider == "GEMINI":
+                    payload = {
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.1, "topP": 0.95}
+                    }
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        res = await client.post(self.gemini_url, json=payload)
+                        
+                        # Handle transient errors (Rate limit or high demand)
+                        if res.status_code in [429, 503] and attempt < max_retries - 1:
+                            jitter = random.uniform(0.5, 2.0)
+                            wait_time = retry_delay + jitter
+                            logger.warning(f"Gemini {res.status_code} (Transient). Retrying in {wait_time:.1f}s... (Attempt {attempt + 1}/{max_retries})")
+                            await asyncio.sleep(wait_time)
+                            retry_delay *= 2  # Exponential backoff
+                            continue
+                            
+                        if res.status_code != 200:
+                            raise Exception(f"Gemini API Error {res.status_code}: {res.text}")
+                        
+                        data = res.json()
+                        data_str = data['candidates'][0]['content']['parts'][0]['text']
+                else:
+                    return {"status": "ERROR", "msg": "Provider mismatch in REST logic"}
 
-            data_str = self._clean_llm_json(data_str)
-            if mask_pii and pii_mapping:
-                data_str = self.masker.unmask(data_str, pii_mapping)
-            
-            raw_data = json.loads(data_str)
-            validated = ExtractionResult(**raw_data)
-            
-            return {
-                "status": "SUCCESS",
-                "data": validated.dict(),
-                "confidence": validated.engine_report.trust_score
-            }
-        except Exception as e:
-            logger.error(f"Extraction Pipeline Error: {str(e)}")
-            return {"status": "ERROR", "msg": str(e)}
+                data_str = self._clean_llm_json(data_str)
+                if mask_pii and pii_mapping:
+                    data_str = self.masker.unmask(data_str, pii_mapping)
+                
+                raw_data = json.loads(data_str)
+                validated = ExtractionResult(**raw_data)
+                
+                return {
+                    "status": "SUCCESS",
+                    "data": validated.dict(),
+                    "confidence": validated.engine_report.get("trust_score", 0.0)
+                }
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    jitter = random.uniform(0.5, 2.0)
+                    wait_time = retry_delay + jitter
+                    logger.warning(f"Extraction attempt {attempt + 1} failed: {str(e)}. Retrying in {wait_time:.1f}s...")
+                    await asyncio.sleep(wait_time)
+                    retry_delay *= 2
+                    continue
+                
+                logger.error(f"Extraction Pipeline Error after {max_retries} attempts: {str(e)}")
+                return {
+                    "status": "ERROR", 
+                    "msg": f"Failed after {max_retries} attempts: {str(e)}"
+                }

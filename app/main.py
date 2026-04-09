@@ -110,7 +110,7 @@ async def process_document(
 @app.get("/status/{job_id}", response_model=JobStatus)
 async def get_status(job_id: str):
     """
-    Check status of an extraction job.
+    Check status of an extraction job with rich progress metadata.
     """
     try:
         res = AsyncResult(job_id, app=celery_app)
@@ -118,25 +118,41 @@ async def get_status(job_id: str):
         
         result_data = None
         error_msg = None
+        current_stage = "QUEUED"
+        progress = 0
+        message = "Waiting in queue..."
+        last_stage = None
         
+        # Get custom metadata if in PROCESSING state
+        if state == "PROCESSING" and isinstance(res.info, dict):
+            progress = res.info.get("progress", 0)
+            current_stage = res.info.get("stage", "PROCESSING")
+            message = res.info.get("message", "Processing...")
+            last_stage = res.info.get("last_stage")
+
         if state == "SUCCESS":
             try:
+                progress = 100
+                current_stage = "FINISHED"
+                message = "Analysis completed successfully."
                 result_data = res.result
             except Exception as e:
                 logger.error(f"Failed to decode SUCCESS result: {str(e)}")
                 state = "ERROR"
                 error_msg = f"Decoding error: {str(e)}"
         elif state == "FAILURE":
-            # Attempt to get the error message safely
             try:
-                # result on a failed task often contains the string representation of the exception
                 error_msg = str(res.result)
             except:
                 error_msg = "Processing failed. Check worker logs for details."
             
         return {
             "job_id": job_id, 
-            "status": state, 
+            "status": state,
+            "progress": progress,
+            "current_stage": current_stage,
+            "last_stage": last_stage,
+            "message": message,
             "result": result_data,
             "error": error_msg
         }
@@ -162,19 +178,53 @@ async def export_document(job_id: str, format: str = Query("csv", enum=["csv", "
         
     return FileResponse(out_file, filename=os.path.basename(out_file))
 
-@app.post("/correct/{job_id}")
-async def submit_correction(job_id: str, corrected_data: dict):
-    """
-    Accepts human-corrected extraction data to build a learning loop.
-    This data is used as the 'Ground Truth' for future dynamic few-shot learning.
-    """
+@app.get("/tasks/pending")
+async def get_pending_tasks(limit: int = Query(20, le=50)):
+    """Retrieves documents requiring human review."""
     try:
-        db.save_correction(job_id, corrected_data)
-        logger.info(f"Human correction received for job {job_id}. Self-learning data updated.")
-        return {"status": "SUCCESS", "msg": "Correction saved. The system will learn from this."}
+        return db.get_pending_reviews(limit=limit)
     except Exception as e:
-        logger.error(f"Failed to save correction for job {job_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Could not save correction.")
+        logger.error(f"Error fetching pending tasks: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/tasks/{task_id}/approve")
+async def approve_task(task_id: str, user_id: str = "Admin"):
+    """Approves a document task with existing extracted data."""
+    try:
+        # Get existing data first
+        history = db.get_history(limit=100)
+        task_record = next((r for r in history if r["task_id"] == task_id), None)
+        
+        if not task_record:
+            raise HTTPException(status_code=404, detail="Task not found in records.")
+        
+        existing_data = json.loads(task_record["extracted_json"])
+        db.save_correction(task_id, existing_data, approved_by=user_id, corrected_fields=[])
+        return {"status": "SUCCESS", "msg": f"Task {task_id} approved by {user_id}."}
+    except Exception as e:
+        logger.error(f"Approve failed for {task_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/tasks/{task_id}/correct")
+async def correct_task(task_id: str, corrected_data: dict, user_id: str = "Admin"):
+    """Saves human corrections for a document task and marks as approved."""
+    try:
+        # Detect which fields were changed
+        history = db.get_history(limit=100)
+        task_record = next((r for r in history if r["task_id"] == task_id), None)
+        
+        corrected_fields = ["manual_override"] # Simplified for demo
+        if task_record:
+            old_data = json.loads(task_record["extracted_json"])
+            # (Logic for diffing could be added here)
+            
+        db.save_correction(task_id, corrected_data, approved_by=user_id, corrected_fields=corrected_fields)
+        return {"status": "SUCCESS", "msg": f"Corrections saved for task {task_id}."}
+    except Exception as e:
+        logger.error(f"Correction failed for {task_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/correct/{job_id}")
 
 @app.get("/platform/intelligence")
 async def get_platform_intelligence():

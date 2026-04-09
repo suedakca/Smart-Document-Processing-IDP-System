@@ -40,15 +40,22 @@ class DatabaseClient:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS extractions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT UNIQUE,
                 filename TEXT,
                 document_type TEXT,
                 trust_score REAL,
                 extracted_json TEXT,
+                status TEXT DEFAULT 'SUCCESS',
                 is_verified INTEGER DEFAULT 0,
                 corrected_json TEXT,
+                validation_report TEXT,
                 processing_time REAL,
                 error_type TEXT,
                 api_key_id INTEGER,
+                raw_text TEXT,
+                approved_by TEXT,
+                approved_at TIMESTAMP,
+                corrected_fields TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(api_key_id) REFERENCES api_keys(id)
             )
@@ -58,14 +65,22 @@ class DatabaseClient:
         cursor.execute("PRAGMA table_info(extractions)")
         existing_cols = [row[1] for row in cursor.fetchall()]
         
-        for col, col_def in [
+        migration_targets = [
+            ("task_id", "TEXT"),
+            ("status", "TEXT DEFAULT 'SUCCESS'"),
             ("is_verified", "INTEGER DEFAULT 0"),
             ("corrected_json", "TEXT"),
+            ("validation_report", "TEXT"),
             ("processing_time", "REAL"),
             ("error_type", "TEXT"),
             ("api_key_id", "INTEGER"),
-            ("raw_text", "TEXT")
-        ]:
+            ("raw_text", "TEXT"),
+            ("approved_by", "TEXT"),
+            ("approved_at", "TIMESTAMP"),
+            ("corrected_fields", "TEXT")
+        ]
+        
+        for col, col_def in migration_targets:
             if col not in existing_cols:
                 logger.info(f"Database Migration: Adding column {col} to extractions table")
                 cursor.execute(f"ALTER TABLE extractions ADD COLUMN {col} {col_def}")
@@ -73,20 +88,49 @@ class DatabaseClient:
         conn.commit()
         conn.close()
 
-    def save_correction(self, job_id, corrected_data):
-        """Saves user correction to build 'Ground Truth' for learning."""
+    def save_correction(self, task_id, corrected_data, approved_by="User", corrected_fields=None):
+        """Saves user correction and audit trail."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        # Note: job_id here is the celery job id, but extractions table has integer id.
-        # We need to map job_id to extraction record. Let's assume we store job_id in extraction or use integer id.
-        # Fixed: save_result should store job_id. Let's add job_id column.
+        import datetime
+        now = datetime.datetime.now().isoformat()
+        
         cursor.execute('''
             UPDATE extractions 
-            SET corrected_json = ?, is_verified = 1 
-            WHERE id = (SELECT id FROM extractions WHERE filename LIKE ? ORDER BY created_at DESC LIMIT 1)
-        ''', (json.dumps(corrected_data), f"%{job_id}%"))
+            SET corrected_json = ?, 
+                is_verified = 1, 
+                approved_by = ?, 
+                approved_at = ?, 
+                corrected_fields = ?,
+                status = 'APPROVED'
+            WHERE task_id = ?
+        ''', (json.dumps(corrected_data), approved_by, now, json.dumps(corrected_fields or []), task_id))
         conn.commit()
         conn.close()
+
+    def save_result(self, task_id, filename, doc_type, trust_score, result_dict, processing_time=0.0, status="SUCCESS", validation_report=None, key_id=None, raw_text=None):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO extractions (task_id, filename, document_type, trust_score, extracted_json, status, processing_time, validation_report, api_key_id, raw_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (task_id, filename, doc_type, trust_score, json.dumps(result_dict), status, processing_time, json.dumps(validation_report or {}), key_id, raw_text))
+        conn.commit()
+        conn.close()
+
+    def get_pending_reviews(self, limit=20):
+        """Retrieves documents flagged for human review."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM extractions 
+            WHERE status = 'REVIEW_REQUIRED' 
+            ORDER BY created_at DESC LIMIT ?
+        ''', (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
 
     def get_verified_examples(self, doc_type, limit=3):
         """Retrieves best corrected examples for Dynamic Few-Shot."""
@@ -123,16 +167,6 @@ class DatabaseClient:
         row = cursor.fetchone()
         conn.close()
         return row[0] if row else None
-
-    def save_result(self, filename, doc_type, trust_score, result_dict, processing_time=0.0, error_type=None, key_id=None, raw_text=None):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO extractions (filename, document_type, trust_score, extracted_json, processing_time, error_type, api_key_id, raw_text)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (filename, doc_type, trust_score, json.dumps(result_dict), processing_time, error_type, key_id, raw_text))
-        conn.commit()
-        conn.close()
 
     def get_stats(self):
         """Returns statistics for Dashboard."""

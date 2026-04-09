@@ -69,7 +69,10 @@ def process_document_v2(self, file_path, original_filename, mask_pii=False, key_
     
     try:
         # 1. File Handling
+        # 1. File Handling
         stages["file_processing"]["status"] = "IN_PROGRESS"
+        self.update_state(state='PROCESSING', meta={'progress': 10, 'stage': 'FILE_PREP', 'message': 'Preparing document for OCR...'})
+        
         if FileHandler.is_pdf(file_path):
             temp_images = FileHandler.pdf_to_images(file_path, os.path.dirname(file_path))
         else:
@@ -78,6 +81,8 @@ def process_document_v2(self, file_path, original_filename, mask_pii=False, key_
             
         # 2. Processor (OCR + TABLE)
         stages["ocr"]["status"] = "IN_PROGRESS"
+        self.update_state(state='PROCESSING', meta={'progress': 25, 'stage': 'OCR', 'message': 'Extracting raw text and table structures...'})
+        
         proc_report = doc_processor.process(temp_images)
         metrics = proc_report["metrics"]
         ocr_results = proc_report["all_ocr_results"]
@@ -103,14 +108,19 @@ def process_document_v2(self, file_path, original_filename, mask_pii=False, key_
         raw_text_list = [d["text"] for d in ocr_results]
         mean_ocr_conf = sum([d["confidence"] for d in ocr_results]) / len(ocr_results)
             
-        # 3. Classification
+        # 3. Hierarchical Classification
         stages["classification"]["status"] = "IN_PROGRESS"
-        category, _ = classifier.classify(ocr_results)
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'stage': 'CLASSIFICATION', 'message': 'Classifying document taxonomy...'})
+        
+        class_res = classifier.classify(ocr_results)
+        category = class_res["domain"]
         stages["classification"]["status"] = "SUCCESS" if category != "UNKNOWN" else "PARTIAL_SUCCESS"
-        stages["classification"]["details"] = f"Detected Type: {category}"
+        stages["classification"]["details"] = f"Domain: {category} | Type: {class_res['document_type']}"
+        stages["classification"]["metrics"] = class_res
         
         # 4. LLM & Data Extraction
         stages["llm_extraction"]["status"] = "IN_PROGRESS"
+        self.update_state(state='PROCESSING', meta={'progress': 75, 'stage': 'EXTRACTION', 'message': 'Extracting granular financial data...'})
         
         async def run_extraction():
             llm_res = await llm_layer.extract_dynamic_json(
@@ -146,29 +156,75 @@ def process_document_v2(self, file_path, original_filename, mask_pii=False, key_
         else:
             stages["llm_extraction"]["status"] = "SUCCESS"
 
-        # 5. Weighted Trust & Final State logic
+        # --- 5. Deterministic Validation Engine ---
+        from .services.validation_engine import ValidationEngine as BusinessValidationEngine
+        validation_report = None
+        if extracted_data:
+            validation_report = BusinessValidationEngine.validate(extracted_data)
+            extracted_data["validation_report"] = validation_report.model_dump()
+            
+            # If validation failed or warned, we might need a review
+            if validation_report.status in ["WARNING", "ERROR"]:
+                pipeline_status = "REVIEW_REQUIRED"
+
+        # --- 6. Weighted Trust & Final State logic ---
         overall_trust = (mean_ocr_conf * 0.7) + (llm_success_bit * 0.3)
-        if overall_trust < 0.4:
-            logger.warning(f"[PIPELINE] Trust score {overall_trust:.2f} too low. Degrading to PARTIAL_FAILURE.")
-            pipeline_status = "PARTIAL_FAILURE"
+        
+        # Ensure extracted_data is a stable skeleton if extraction failed
+        if extracted_data is None:
+            # (Skeleton logic remains similar, but using new structures if possible)
+            extracted_data = {
+                "document_analysis": {
+                    "type": {"value": category, "confidence": 1.0, "source": "classifier"},
+                    "status": {"value": "FAILED", "confidence": 0.0, "source": "system"}
+                },
+                "financial_hierarchy": { "root_transaction": { "amount": {"value": 0.0, "confidence": 0.0, "source": "system"}, "is_valid": False }, "adjustments_and_fees": [] },
+                "engine_report": { "trust_score": round(overall_trust, 4), "logic_applied": "SkeletonFallback" }
+            }
+
+        if overall_trust < 0.6:  # Increased threshold for enterprise
+            logger.warning(f"[PIPELINE] Trust score {overall_trust:.2f} too low. Marking for REVIEW.")
+            pipeline_status = "REVIEW_REQUIRED"
 
         duration = time.time() - start_time
         
-        # Construct Final Result Object
+        # Construct Pipeline Result (Needed for Decision Engine)
         final_pipeline_result = {
             "status": pipeline_status,
             "overall_trust_score": round(overall_trust, 4),
             "stages": stages,
             "data": extracted_data,
-            "processing_time": round(duration, 2)
+            "full_raw_text": " ".join(raw_text_list),
+            "processing_time": round(duration, 2),
+            "validation_report": validation_report.model_dump() if validation_report else None
         }
 
-        # 6. Database Persistence
+        # --- 7. Rule-Based Decision Engine ---
+        from .services.decision_engine import DecisionEngine
+        decision_result = DecisionEngine.evaluate_decision(final_pipeline_result)
+        
+        # Update pipeline status based on decision recommendation
+        if decision_result.recommended_action == "REJECT":
+            pipeline_status = "FAILED"
+        elif decision_result.recommended_action == "ESCALATE":
+            pipeline_status = "REVIEW_REQUIRED" # Escalate is a flavor of Review for now
+        elif decision_result.recommended_action in ["AUTO_APPROVE", "AUTO_BOOK"]:
+            pipeline_status = "SUCCESS" # Mark as success if engine approves
+
+        final_pipeline_result["status"] = pipeline_status
+        final_pipeline_result["decision_engine"] = decision_result.model_dump()
+        if extracted_data:
+            extracted_data["decision_engine"] = decision_result.model_dump()
+
+        # --- 8. Database Persistence (Now with Task ID and Status) ---
         db.save_result(
+            task_id=self.request.id,
             filename=original_filename,
             doc_type=category,
             trust_score=overall_trust,
             result_dict=final_pipeline_result,
+            status=pipeline_status,
+            validation_report=validation_report.model_dump() if validation_report else None,
             processing_time=duration,
             key_id=key_id,
             raw_text=" ".join(raw_text_list)

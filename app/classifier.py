@@ -1,43 +1,77 @@
 import re
+from typing import List, Dict, Tuple, Any
 
 class DocumentClassifier:
+    """
+    Schema-aware hierarchical document classifier.
+    Detects Domain -> Family -> Type -> Transaction.
+    """
     def __init__(self):
-        # Professional-grade categorized keyword groups
-        self.categories = {
-            "BANKING": [
-                "DEKONT", "HAVALE", "EFT", "TRANSFER", "IBAN", "HESAP NO", "SUBE KODU", "BANKASI", "MASRAF", "BSMV"
-            ],
-            "RETAIL": [
-                "FATURA", "FIS", "BELGE NO", "KDV", "TAX", "TOTAL", "TOPLAM", "TUTAR", "ARA TOPLAM", "MATRAH", "PERAKENDE"
-            ],
-            "INSURANCE": [
-                "POLICE", "ZEYILNAME", "SIGORTA", "PRİM", "ACENTE", "TEMİNAT", "YÜRÜRLÜK", "TAHSİLAT"
-            ],
-            "HR": [
-                "MAAS", "BORDRO", "ÜCRET", "BRÜT", "NET", "KESINTI", "YASAL KESINTI", "SOSYAL GÜVENLIK", "CALISAN", "GÜNLÜK"
-            ],
-            "ID_CARD": [
-                "T.C. KİMLİK", "NÜFUS CÜZDANI", "DOĞUM TARİHİ", "ANNE ADI", "BABA ADI", "SURNAME", "NAME"
-            ]
+        # Semantic mapping for Rule-based Scoring
+        self.rules = {
+            "BANKING": {
+                "signals": ["DEKONT", "HAVALE", "EFT", "IBAN", "HESAP NUMARASI", "MÜŞTERİ NUMARASI", "MASRAF TUTARI", "BSMV", "TUTAR", "BANKASI"],
+                "target_family": "RECEIPT"
+            },
+            "RETAIL": {
+                "signals": ["FATURA", "FİŞ", "BELGE NO", "KDV", "TAX", "PERAKENDE", "SATIŞ"],
+                "target_family": "INVOICE"
+            }
         }
 
-    def classify(self, text_lines):
-        full_text = " ".join([d["text"].upper() for d in text_lines])
-        scores = {cls: 0 for cls in self.categories}
+    def classify(self, text_lines: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Hierarchical classification based on semantic signals.
+        Returns a structured result compatible with DetailedClassificationResult schema.
+        """
+        full_text = " ".join([str(d.get("text", "")).upper() for d in text_lines])
         
-        for cls, keywords in self.categories.items():
-            for kw in keywords:
-                # Weighted score: More occurrences = higher confidence
-                # Exact matches in IDP are usually clear
-                if kw in full_text:
-                    scores[cls] += 1
-        
-        # Determine best match
-        if not scores or all(s == 0 for s in scores.values()):
-            return "UNKNOWN", 0.0
-            
-        best_match = max(scores, key=scores.get)
-        total_score = sum(scores.values())
-        confidence = scores[best_match] / total_score if total_score > 0 else 0.0
-        
-        return best_match, round(confidence, 2)
+        # 1. Domain Detection
+        domain_scores = {}
+        for domain, meta in self.rules.items():
+            found_signals = [sig for sig in meta["signals"] if sig in full_text]
+            domain_scores[domain] = {
+                "score": len(found_signals),
+                "signals": found_signals,
+                "family": meta["target_family"]
+            }
+
+        # 2. Determine Primary Domain
+        best_domain = "UNKNOWN"
+        max_score = 0
+        signals = []
+        family = "UNKNOWN"
+
+        for domain, res in domain_scores.items():
+            if res["score"] > max_score:
+                max_score = res["score"]
+                best_domain = domain
+                signals = res["signals"]
+                family = res["family"]
+
+        # 3. Refine Document and Transaction Type (BANKING SPECIFIC)
+        doc_type = "UNKNOWN"
+        trans_type = "UNKNOWN"
+
+        if best_domain == "BANKING":
+            if "HAVALE" in full_text:
+                trans_type = "HAVALE"
+                doc_type = "BANK_TRANSFER_RECEIPT"
+            elif "EFT" in full_text:
+                trans_type = "EFT"
+                doc_type = "BANK_TRANSFER_RECEIPT"
+            elif "DEKONT" in full_text:
+                doc_type = "BANK_RECEIPT"
+
+        # 4. Calculate Confidence
+        total_signals = len(signals)
+        confidence = min(round(total_signals / 5.0, 2), 1.0) if total_signals > 0 else 0.0
+
+        return {
+            "domain": best_domain,
+            "document_family": family,
+            "document_type": doc_type,
+            "transaction_type": trans_type,
+            "confidence": confidence,
+            "classification_signals": signals
+        }

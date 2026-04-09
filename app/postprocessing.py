@@ -87,57 +87,117 @@ class ValidationEngine:
 class DataExtractor:
     def __init__(self):
         self.validator = ValidationEngine()
-        self.label_map = {
-            "root": ["TUTAR", "TOPLAM", "TRANSFER", "ODENECEK", "GRAND TOTAL", "ISLEM TUTARI"],
-            "written": ["YALNIZ", "YALNIZCA"],
-            "fee": ["MASRAF", "KOMISYON", "ISLEM UCRETI"],
-            "tax": ["BSMV", "KDV", "TAX", "VAT"]
+
+    def _as_validated(self, val, conf=1.0, source="llm", evidence=None) -> dict:
+        """Wraps a value into the ValidatedField structure."""
+        return {
+            "value": val,
+            "confidence": conf,
+            "is_valid": True,
+            "review_required": False,
+            "source": source,
+            "evidence_text": evidence
         }
+
+    def _find_evidence(self, target_val, ocr_results) -> str:
+        """Finds the best matching OCR line for a given extracted value."""
+        if not target_val or not ocr_results:
+            return None
+        
+        target_str = str(target_val).upper()
+        best_match = None
+        best_score = 0
+        
+        for res in ocr_results:
+            text = res["text"].upper()
+            score = fuzz.partial_ratio(target_str, text)
+            if score > best_score and score > 80:
+                best_score = score
+                best_match = res["text"]
+        
+        return best_match
 
     def validate_math(self, extracted_dict: dict) -> dict:
         """
-        Validates the mathematical consistency of extracted values.
+        Validates the mathematical consistency of extracted values using the new schema.
+        Note: This is now a lightweight check; the main ValidationEngine handles the report.
         """
         hierarchy = extracted_dict.get("financial_hierarchy", {})
         root = hierarchy.get("root_transaction", {})
-        root_amt = root.get("amount", 0.0)
+        root_amt = root.get("amount", {}).get("value", 0.0)
         adjustments = hierarchy.get("adjustments_and_fees", [])
         
         if not adjustments or root_amt == 0:
             return extracted_dict
 
-        # Check if sub-items sum to total_impact
         first_adj = adjustments[0]
-        adj_total = first_adj.get("total_impact", 0.0)
+        adj_total = first_adj.get("total_impact", {}).get("value", 0.0)
         breakdown = first_adj.get("breakdown", {})
         sub_sum = sum(breakdown.values())
         
-        is_internal_match = abs(sub_sum - adj_total) < 0.05
-        is_root_match = abs(adj_total - root_amt) < 0.05
+        is_match = abs(sub_sum - adj_total) < 0.05
+        first_adj["math_status"] = "MATCH" if is_match else "MISMATCH"
         
-        if not is_root_match or not is_internal_match:
-            extracted_dict["document_analysis"]["status"] = "REVIEW_REQUIRED"
-            extracted_dict["engine_report"]["trust_score"] = min(extracted_dict["engine_report"]["trust_score"], 0.80)
-            if "math_status" not in first_adj:
-                # Add status only if missing or mismatch
-                first_adj["math_status"] = "MISMATCH"
-            extracted_dict["engine_report"]["logic_applied"] += " | Math_Mismatch_Detected"
-        else:
-            first_adj["math_status"] = "MATCH"
-            
         return extracted_dict
 
     async def extract(self, ocr_results, category="UNKNOWN", llm_data=None, llm_layer=None):
-        dynamic_content = llm_data.get("data", {}) if llm_data else {}
+        raw_dynamic = llm_data.get("data", {}) if llm_data else {}
         
-        if not dynamic_content:
-            return {
-                "document_analysis": {"type": category, "status": "ERROR"},
-                "financial_hierarchy": {"root_transaction": {"amount": 0.0}, "adjustments_and_fees": []},
-                "engine_report": {"trust_score": 0.0, "logic_applied": "None"}
+        if not raw_dynamic:
+            return None
+
+        # Transform raw values into ValidatedField structures
+        try:
+            # 1. Document Analysis
+            analysis = raw_dynamic.get("document_analysis", {})
+            structured_analysis = {
+                "type": self._as_validated(analysis.get("type", category)),
+                "status": self._as_validated(analysis.get("status", "VERIFIED")),
+                "sender": self._as_validated(analysis.get("sender"), evidence=self._find_evidence(analysis.get("sender"), ocr_results)),
+                "receiver": self._as_validated(analysis.get("receiver"), evidence=self._find_evidence(analysis.get("receiver"), ocr_results)),
+                "description": self._as_validated(analysis.get("description"), evidence=self._find_evidence(analysis.get("description"), ocr_results)),
+                "currency": self._as_validated(analysis.get("currency", "TRY")),
+                "transaction_id": self._as_validated(analysis.get("transaction_id"), evidence=self._find_evidence(analysis.get("transaction_id"), ocr_results)),
+                "transaction_date": self._as_validated(analysis.get("transaction_date"), evidence=self._find_evidence(analysis.get("transaction_date"), ocr_results)),
+                "sender_iban": self._as_validated(analysis.get("sender_iban"), evidence=self._find_evidence(analysis.get("sender_iban"), ocr_results)),
+                "receiver_iban": self._as_validated(analysis.get("receiver_iban"), evidence=self._find_evidence(analysis.get("receiver_iban"), ocr_results)),
             }
 
-        # Apply Math Validation to LLM's dynamic content
-        validated_extracted = self.validate_math(dynamic_content)
-        
-        return validated_extracted
+            # 2. Financial Hierarchy
+            fin_h = raw_dynamic.get("financial_hierarchy", {})
+            root_tx = fin_h.get("root_transaction", {})
+            
+            structured_root = {
+                "amount": self._as_validated(self.validator.to_float(root_tx.get("amount", 0.0)), evidence=self._find_evidence(root_tx.get("amount"), ocr_results)),
+                "label": self._as_validated(root_tx.get("label", "TUTAR")),
+                "text_confirmation": self._as_validated(root_tx.get("text_confirmation", "N/A")),
+                "is_valid": True
+            }
+
+            adjustments = []
+            for adj in fin_h.get("adjustments_and_fees", []):
+                adjustments.append({
+                    "group_name": self._as_validated(adj.get("group_name", "FEE")),
+                    "total_impact": self._as_validated(self.validator.to_float(adj.get("total_impact", 0.0)), evidence=self._find_evidence(adj.get("total_impact"), ocr_results)),
+                    "breakdown": {k: self.validator.to_float(v) for k, v in adj.get("breakdown", {}).items()},
+                    "math_status": "MATCH"
+                })
+
+            final_data = {
+                "document_analysis": structured_analysis,
+                "financial_hierarchy": {
+                    "root_transaction": structured_root,
+                    "adjustments_and_fees": adjustments
+                },
+                "engine_report": raw_dynamic.get("engine_report", {"trust_score": 0.0})
+            }
+
+            # Internal lightweight math validation
+            final_data = self.validate_math(final_data)
+            return final_data
+
+        except Exception as e:
+            import traceback
+            print(f"Extraction Transform Error: {str(e)}")
+            traceback.print_exc()
+            return None

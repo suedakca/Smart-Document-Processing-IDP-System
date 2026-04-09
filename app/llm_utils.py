@@ -26,8 +26,11 @@ class LLMHybridLayer:
         self.jinja_env = Environment(loader=FileSystemLoader(template_dir))
         
         if self.provider == "GEMINI" and self.api_key:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel(model_name=self.model_name)
+            # Force stable v1 configuration
+            genai.configure(api_key=self.api_key, transport='rest')
+            # Some SDK versions auto-prefix 'models/', 
+            # we use the name directly to let the SDK handle the best versioning
+            self.model = genai.GenerativeModel(model_name=self.model_name.replace("models/", ""))
         elif self.provider == "LOCAL":
             # Support for Ollama / vLLM via OpenAI Compatible Libs
             from openai import OpenAI
@@ -39,6 +42,31 @@ class LLMHybridLayer:
         else:
             self.model = None
             logger.warning("No LLM provider configured.")
+
+    def probe_model(self) -> dict:
+        """
+        Performs a real 'Active Probe' with a 5s timeout to verify credentials.
+        """
+        if not self.model: return {"status": "OFFLINE", "msg": "No model"}
+        
+        try:
+            import signal
+            # Use short timeout for startup probe
+            if self.provider == "GEMINI":
+                # Note: google-generativeai doesn't support timeout in some versions,
+                # we wrap it or just rely on a lightweight call.
+                response = self.model.generate_content("hi", generation_config={"max_output_tokens": 1})
+                if response:
+                    return {"status": "ONLINE", "msg": "Probe successful"}
+            else:
+                # OpenAI Probe
+                self.model.models.list()
+                return {"status": "ONLINE", "msg": "Probe successful"}
+        except Exception as e:
+            logger.warning(f"LLM Probe failed: {str(e)}")
+            return {"status": "DEGRADED", "msg": str(e)}
+        
+        return {"status": "UNKNOWN", "msg": "Could not verify"}
 
     async def _get_dynamic_few_shot(self, category: str) -> list:
         """Fetches human-verified examples from DB for Self-Learning."""

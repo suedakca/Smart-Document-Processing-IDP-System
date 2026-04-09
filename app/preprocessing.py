@@ -6,6 +6,32 @@ from skimage.feature import canny
 
 class ImagePreprocessor:
     @staticmethod
+    def is_hopeless(image) -> tuple:
+        """
+        Fast-fail heuristic to detect blank or near-unreadable images.
+        """
+        if image is None: return True, "null_image"
+        # Check for extreme brightness/darkness (near-blank)
+        mean_val = np.mean(image)
+        if mean_val < 5: return True, "pure_black_image"
+        if mean_val > 250: return True, "pure_white_image"
+        # Laplacian Variance for blur detection
+        lat = cv2.Laplacian(image, cv2.CV_64F).var()
+        if lat < 2.0: return True, "void_image_no_edges"
+        return False, ""
+
+    @staticmethod
+    def is_clean_document(image) -> bool:
+        """
+        Detects if the image is high-contrast and low-noise.
+        """
+        if image is None: return False
+        # If it's already grayscale, no need to convert
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+        std = np.std(gray)
+        return 40 < std < 100
+
+    @staticmethod
     def grayscale(image):
         if len(image.shape) == 3:
             return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -71,17 +97,36 @@ class ImagePreprocessor:
         
         return rotated
 
-    def process_numpy(self, img):
+    @staticmethod
+    def normalize(image):
+        """Standardizes pixel intensities."""
+        return cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
+
+    @staticmethod
+    def adaptive_threshold(image):
+        """Fallback for extremely faded text."""
+        if len(image.shape) == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return cv2.adaptiveThreshold(image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+
+    def process_numpy(self, img, apply_clahe=True, apply_norm=True):
         if img is None:
             return None
             
-        # 1. Resize if too large (already handled by upscale check in processor, but good for safety)
+        # 1. Resize if too large
         img = self.resize_if_needed(img)
         
-        # 2. Simple Grayscale
+        # 2. Grayscale
         gray = self.grayscale(img)
         
-        # Note: We return the grayscale version as PaddleOCR performs its own binarization.
+        # 3. Robust Contrast (CLAHE)
+        if apply_clahe:
+            gray = self.adjust_contrast(gray)
+            
+        # 4. Normalization
+        if apply_norm:
+            gray = self.normalize(gray)
+        
         return gray
 
     def process(self, image_path):

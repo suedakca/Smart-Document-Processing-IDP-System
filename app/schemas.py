@@ -30,8 +30,20 @@ class ExtractionResult(BaseModel):
     financial_hierarchy: FinancialHierarchy
     engine_report: EngineReport
 
+class StageReport(BaseModel):
+    status: str
+    details: Optional[str] = None
+    metrics: Optional[Dict[str, Any]] = None
+
+class PipelineResult(BaseModel):
+    status: str  # SUCCESS, FAILED, PARTIAL_FAILURE
+    overall_trust_score: float
+    stages: Dict[str, StageReport]
+    data: Optional[ExtractionResult] = None
+    processing_time: float
+
 class JobStatus(BaseModel):
     job_id: str
     status: str
-    result: Optional[ExtractionResult] = None
+    result: Optional[PipelineResult] = None
     error: Optional[str] = None

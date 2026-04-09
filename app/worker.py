@@ -51,100 +51,156 @@ db = DatabaseClient()
 @celery_app.task(name="process_document_v2", bind=True)
 def process_document_v2(self, file_path, original_filename, mask_pii=False, key_id=None):
     """
-    Background task to process a document (Image or PDF).
+    Enterprise-Grade pipeline with honest status propagation and weighted trust.
     """
     import time
     start_time = time.time()
-    logger.info(f"[STEP 0] Task {self.request.id} started for {original_filename}")
+    logger.info(f"[PIPELINE] Task {self.request.id} started for {original_filename}")
+    
+    # Initiative Global Pipeline State
+    stages = {
+        "file_processing": {"status": "NOT_STARTED"},
+        "ocr": {"status": "NOT_STARTED"},
+        "classification": {"status": "NOT_STARTED"},
+        "llm_extraction": {"status": "NOT_STARTED"}
+    }
+    pipeline_status = "SUCCESS"
     temp_images = []
     
     try:
-        # 1. Convert to images if PDF
-        logger.info(f"[STEP 1] File check: {file_path}")
+        # 1. File Handling
+        stages["file_processing"]["status"] = "IN_PROGRESS"
         if FileHandler.is_pdf(file_path):
-            logger.info("Converting PDF to images...")
             temp_images = FileHandler.pdf_to_images(file_path, os.path.dirname(file_path))
         else:
             temp_images = [file_path]
+        stages["file_processing"]["status"] = "SUCCESS"
             
         # 2. Processor (OCR + TABLE)
-        logger.info(f"[STEP 2] Starting OCR Processor on {len(temp_images)} page(s)...")
-        ocr_results, table_md = doc_processor.process(temp_images)
+        stages["ocr"]["status"] = "IN_PROGRESS"
+        proc_report = doc_processor.process(temp_images)
+        metrics = proc_report["metrics"]
+        ocr_results = proc_report["all_ocr_results"]
+        table_md = proc_report["all_table_markdown"]
         
-        if not ocr_results:
-            logger.warning("[STEP 2] OCR failed: No text extracted.")
-            raise ValueError("No text extracted from document")
+        stages["ocr"]["metrics"] = metrics
+        if metrics["total_blocks"] == 0:
+            logger.error(f"[STAGE: OCR] FAILED - Zero blocks across {metrics['page_count']} pages.")
+            stages["ocr"]["status"] = "FAILED"
+            stages["ocr"]["details"] = "Document appears blank or unreadable after 3-tier processing."
             
-        logger.info(f"[STEP 2] OCR completed. Extracted {len(ocr_results)} lines.")
-        raw_text_list = [d["text"] for d in ocr_results]
+            # FAIL FAST
+            final_res = {
+                "status": "FAILED",
+                "overall_trust_score": 0.0,
+                "stages": stages,
+                "processing_time": time.time() - start_time
+            }
+            FileHandler.cleanup([file_path] + temp_images)
+            return final_res
         
+        stages["ocr"]["status"] = "SUCCESS"
+        raw_text_list = [d["text"] for d in ocr_results]
+        mean_ocr_conf = sum([d["confidence"] for d in ocr_results]) / len(ocr_results)
+            
         # 3. Classification
-        logger.info("[STEP 3] Starting classification...")
+        stages["classification"]["status"] = "IN_PROGRESS"
         category, _ = classifier.classify(ocr_results)
-        logger.info(f"[STEP 3] Document classified as: {category}")
+        stages["classification"]["status"] = "SUCCESS" if category != "UNKNOWN" else "PARTIAL_SUCCESS"
+        stages["classification"]["details"] = f"Detected Type: {category}"
         
         # 4. LLM & Data Extraction
-        logger.info("[STEP 4] Starting LLM Data Extraction...")
+        stages["llm_extraction"]["status"] = "IN_PROGRESS"
         
-        # Safer asyncio handling for Celery workers
         async def run_extraction():
             llm_res = await llm_layer.extract_dynamic_json(
                 raw_text_list, 
-                table_markdown=table_md, 
+                table_markdown="\n".join(table_md), 
                 category=category, 
                 mask_pii=mask_pii
             )
+            if llm_res.get("status") == "ERROR":
+                return llm_res, None
+            
             extracted = await data_extractor.extract(
                 ocr_results,
                 category=category,
                 llm_data=llm_res,
                 llm_layer=llm_layer
             )
-            return extracted
+            return llm_res, extracted
 
         try:
-            extracted_data = asyncio.run(run_extraction())
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            extracted_data = loop.run_until_complete(run_extraction())
+            llm_res, extracted_data = asyncio.run(run_extraction())
+        except Exception as e:
+            logger.error(f"Async loop error: {str(e)}")
+            llm_res = {"status": "ERROR", "msg": str(e)}
+            extracted_data = None
 
-        logger.info("[STEP 4] LLM Extraction completed.")
-        
-        # Construct full_text for the database
-        full_text = " ".join(raw_text_list)
-        
-        # 5. Save to DB with extra metrics
+        llm_success_bit = 1.0
+        if llm_res.get("status") == "ERROR":
+            stages["llm_extraction"]["status"] = "FAILED"
+            stages["llm_extraction"]["details"] = llm_res.get("msg")
+            pipeline_status = "PARTIAL_FAILURE"
+            llm_success_bit = 0.0
+        else:
+            stages["llm_extraction"]["status"] = "SUCCESS"
+
+        # 5. Weighted Trust & Final State logic
+        overall_trust = (mean_ocr_conf * 0.7) + (llm_success_bit * 0.3)
+        if overall_trust < 0.4:
+            logger.warning(f"[PIPELINE] Trust score {overall_trust:.2f} too low. Degrading to PARTIAL_FAILURE.")
+            pipeline_status = "PARTIAL_FAILURE"
+
         duration = time.time() - start_time
-        meta = extracted_data.get("document_analysis", {})
-        report = extracted_data.get("engine_report", {})
         
+        # Construct Final Result Object
+        final_pipeline_result = {
+            "status": pipeline_status,
+            "overall_trust_score": round(overall_trust, 4),
+            "stages": stages,
+            "data": extracted_data,
+            "processing_time": round(duration, 2)
+        }
+
+        # 6. Database Persistence
         db.save_result(
             filename=original_filename,
-            doc_type=meta.get("type", "UNKNOWN"),
-            trust_score=report.get("trust_score", 0.0),
-            result_dict=extracted_data,
+            doc_type=category,
+            trust_score=overall_trust,
+            result_dict=final_pipeline_result,
             processing_time=duration,
             key_id=key_id,
-            raw_text=full_text  # Save source for learning loop
+            raw_text=" ".join(raw_text_list)
         )
         
-        # 6. Cleanup
-        FileHandler.cleanup([file_path] + (temp_images if FileHandler.is_pdf(file_path) else []))
-        logger.info(f"[SUCCESS] Task {self.request.id} completed in {duration:.2f}s")
-        return extracted_data
+        # 7. Final Summary & Cleanup
+        FileHandler.cleanup([file_path] + temp_images)
+        
+        # Log Concise Structured Summary
+        ocr_dur = final_pipeline_result["stages"]["ocr"].get("metrics", {}).get("total_ocr_duration", 0)
+        total_blocks = final_pipeline_result["stages"]["ocr"].get("metrics", {}).get("total_blocks", 0)
+        passes_stats = final_pipeline_result["stages"]["ocr"].get("metrics", {}).get("pass_results", [])
+        avg_passes = sum([len(p["results"]) for p in passes_stats]) / len(passes_stats) if passes_stats else 0
+        
+        logger.info(f"--- [TASK SUMMARY] {original_filename} ---")
+        logger.info(f"Status: {pipeline_status} | Trust: {overall_trust:.2f}")
+        logger.info(f"OCR: {total_blocks} blocks | Duration: {ocr_dur:.2f}s | Avg Passes: {avg_passes:.1f}")
+        logger.info(f"Total Processing: {duration:.2f}s")
+        logger.info(f"------------------------------------------")
+        
+        return final_pipeline_result
 
     except Exception as e:
-        logger.error(f"FATAL ERROR in task {self.request.id}: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        
-        # Cleanup if we have temp images
-        if temp_images:
-            FileHandler.cleanup(temp_images if FileHandler.is_pdf(file_path) else [])
-            
-        # Re-raise to let Celery handle the failure state naturally with the original error
-        raise
+        logger.exception(f"CRITICAL ERROR in pipeline: {str(e)}")
+        FileHandler.cleanup([file_path] + temp_images)
+        return {
+            "status": "FAILED",
+            "overall_trust_score": 0.0,
+            "stages": stages,
+            "error": str(e),
+            "processing_time": time.time() - start_time
+        }
 
 @celery_app.task(name="cleanup_uploads_task")
 def cleanup_uploads_task():

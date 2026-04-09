@@ -37,13 +37,11 @@ class DocumentProcessor:
         self.structure_engine = None
         if PPStructure is not None:
             try:
-                # Basic initialization without problematic parameters
-                self.structure_engine = PPStructure(
-                    det_db_thresh=0.1
-                )
+                # Basic initialization - avoiding show_log conflicts
+                self.structure_engine = PPStructure()
                 logger.info("Table analysis engine (PPStructureV3) initialized.")
             except Exception as e:
-                logger.warning(f"Failed to load PPStructure: {str(e)}. Table analysis will be skipped.")
+                logger.warning(f"Failed to load PPStructure: {str(e)}. Table analysis skipped.")
                 self.structure_engine = None
         else:
             logger.warning("PPStructure module not available. Layout analysis will be limited.")
@@ -65,6 +63,12 @@ class DocumentProcessor:
             return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
         return img
 
+    def _ensure_3_channel(self, img):
+        """Ensures image is 3-channel BGR for PaddleX engine compatibility."""
+        if len(img.shape) == 2:
+            return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        return img
+
     def _format_table_markdown(self, table_info: dict) -> str:
         """
         Converts PaddleStructure table info to Markdown format.
@@ -73,63 +77,199 @@ class DocumentProcessor:
         if not html: return ""
         return f"HTML_TABLE:\n{html}\n"
 
-    def process(self, img_paths: list) -> tuple:
+    def process(self, img_paths: list) -> dict:
         """
-        Processes a list of images and returns:
-        (ocr_results, table_markdown_list)
+        Raw-First OCR Pipeline with Clean Doc Bypass and Tiered Fallback.
         """
+        import time
         if isinstance(img_paths, str):
             img_paths = [img_paths]
             
-        all_ocr_results = []
-        all_table_markdown = []
+        final_report = {
+            "all_ocr_results": [],
+            "all_table_markdown": [],
+            "metrics": {
+                "total_blocks": 0,
+                "total_chars": 0,
+                "page_count": len(img_paths),
+                "page_level": [],
+                "pass_results": [],
+                "confidence_variance": 0.0,
+                "block_variance": 0.0,
+                "total_ocr_duration": 0.0
+            }
+        }
+        
+        debug_mode = os.getenv("DEBUG_OCR", "False").lower() == "true"
+        all_page_blocks = []
+        all_page_confs = []
+        global_start = time.perf_counter()
         
         for i, img_path in enumerate(img_paths):
             try:
                 if not os.path.exists(img_path): continue
                 
-                # 1. Load and Upscale
+                # 1. Load and Fast-Fail Check
                 raw_img = cv2.imread(img_path)
                 if raw_img is None: continue
                 
+                hopeless, reason = self.preprocessor.is_hopeless(raw_img)
+                if hopeless:
+                    logger.warning(f"Page {i+1}: Fast-fail triggered. Reason: {reason}")
+                    final_report["metrics"]["page_level"].append({
+                        "page": i+1, "status": "FAILED", "fast_fail_reason": reason
+                    })
+                    continue
+
+                # 2. Preparation (Upscale + Heuristics)
+                prep_start = time.perf_counter()
                 robust_img = self._upscale_if_needed(raw_img)
+                is_clean = self.preprocessor.is_clean_document(robust_img)
+                if is_clean:
+                    logger.info(f"Page {i+1}: Clean document detected. Favoring raw pass.")
+                
                 processed_img = self.preprocessor.process_numpy(robust_img)
+                prep_duration = time.perf_counter() - prep_start
                 
-                temp_ocr_path = f"{img_path}_robust_ocr.png"
-                cv2.imwrite(temp_ocr_path, processed_img)
+                # Tiered Execution Suite (Re-ordered to prioritize RAW)
+                passes = [
+                    {"name": "raw", "img": self._ensure_3_channel(robust_img)},
+                    {"name": "standard", "img": self._ensure_3_channel(processed_img)},
+                    {"name": "inverted", "img": self._ensure_3_channel(cv2.bitwise_not(processed_img))},
+                    {"name": "adaptive", "img": self._ensure_3_channel(self.preprocessor.adaptive_threshold(processed_img))}
+                ]
                 
-                logger.info(f"Page {i+1}: Robust OCR processing (Pass 1)...")
-                ocr_res = self.ocr.ocr(temp_ocr_path)
+                best_page_result = None
+                pages_attempted = []
                 
-                # FALLBACK: If no text found, try Inverting Colors
-                if not ocr_res or not ocr_res[0]:
-                    logger.warning(f"Page {i+1}: Pass 1 failed. Attempting Pass 2 (Color Inversion)...")
-                    inverted_img = cv2.bitwise_not(processed_img)
-                    cv2.imwrite(temp_ocr_path, inverted_img)
-                    ocr_res = self.ocr.ocr(temp_ocr_path)
+                for p_idx, p in enumerate(passes):
+                    p_start = time.perf_counter()
+                    
+                    # LOG VISUAL STATS
+                    img_stats = f"Mean: {np.mean(p['img']):.1f}, Std: {np.std(p['img']):.1f}"
+                    logger.info(f"Page {i+1}: Pass '{p['name']}' started | {img_stats}")
+                    
+                    # OCR Inference (In-Memory Numpy) with 15s Latency Check
+                    inf_start = time.perf_counter()
+                    ocr_res = self.ocr.ocr(p["img"])
+                    inf_duration = time.perf_counter() - inf_start
+                    
+                    # 1. MANDATORY DIAGNOSTIC LOGGING
+                    logger.info(f"Page {i+1} [{p['name']}]: OCR RAW OUTPUT TYPE: {type(ocr_res)}")
+                    logger.info(f"Page {i+1} [{p['name']}]: OCR RAW OUTPUT: {repr(ocr_res)[:1500]}")
+                    
+                    if inf_duration > 15.0:
+                        logger.warning(f"CRITICAL LATENCY: Pass '{p['name']}' took {inf_duration:.2f}s (>15s limit). Aborting pass.")
+                        pages_attempted.append({"name": p["name"], "status": "ABORTED_TOO_SLOW", "duration": round(inf_duration, 2)})
+                        continue
+                    
+                    # 2. ROBUST PARSING (Handle varied nesting levels and Paddlex objects)
+                    parse_start = time.perf_counter()
+                    valid_blocks = []
+                    
+                    try:
+                        # Attempt to normalize common PaddleOCR formats
+                        if ocr_res and isinstance(ocr_res, list):
+                            # Case A: Standard result [[[box], [text, conf]], ...]
+                            # or nested list-per-page [[[[box], [text, conf]]]]
+                            target = ocr_res[0] if len(ocr_res) > 0 and isinstance(ocr_res[0], list) and len(ocr_res[0]) > 0 and isinstance(ocr_res[0][0], list) else ocr_res
+                            
+                            # Deep search for line blocks
+                            for line in target:
+                                # We expect [bbox, [text, conf]]
+                                if isinstance(line, list) and len(line) == 2 and isinstance(line[1], (list, tuple)):
+                                    valid_blocks.append(line)
+                                elif hasattr(line, 'to_dict'): # Paddlex object fallback
+                                    d = line.to_dict()
+                                    # Translate to standard format if possible
+                                    pass 
+                    except Exception as parse_err:
+                        logger.error(f"Parsing error on pass {p['name']}: {str(parse_err)}")
+
+                    parse_duration = time.perf_counter() - parse_start
+                    block_count = len(valid_blocks)
+                    page_scores = [line[1][1] for line in valid_blocks]
+                    avg_conf = sum(page_scores) / block_count if block_count > 0 else 0
+                    
+                    pass_metric = {
+                        "name": p["name"], 
+                        "blocks": block_count, 
+                        "confidence": round(avg_conf, 4), 
+                        "duration": round(inf_duration + parse_duration, 4),
+                        "debug": {
+                            "prep": round(prep_duration, 4),
+                            "inference": round(inf_duration, 4),
+                            "parse": round(parse_duration, 4)
+                        }
+                    }
+                    pages_attempted.append(pass_metric)
+                    logger.info(f"Page {i+1}: Result: Blocks={block_count}, Conf={avg_conf:.2f} (Inf: {inf_duration:.2f}s, Parse: {parse_duration:.4f}s)")
+                    
+                    # SHORT-CIRCUIT
+                    if block_count > 5 and avg_conf > 0.8:
+                        logger.info(f"Page {i+1}: Short-circuit on '{p['name']}'")
+                        best_page_result = (valid_blocks, p["name"])
+                        break
+                    
+                    if not best_page_result or block_count > len(best_page_result[0]):
+                        best_page_result = (valid_blocks, p["name"])
+
+                # Process Final Winner for this Page
+                if best_page_result and best_page_result[0]:
+                    v_blocks, method = best_page_result
+                    p_chars = 0
+                    for line in v_blocks:
+                        box, (text, score) = line
+                        p_chars += len(text)
+                        final_report["all_ocr_results"].append({
+                            "text": text, "confidence": float(score), "bbox": box, "page": i+1, "method": method
+                        })
+                    
+                    all_page_blocks.append(len(v_blocks))
+                    all_page_confs.append(sum([line[1][1] for line in v_blocks]) / len(v_blocks))
+                    
+                    final_report["metrics"]["total_blocks"] += len(v_blocks)
+                    final_report["metrics"]["total_chars"] += p_chars
+                    final_report["metrics"]["page_level"].append({
+                        "page": i+1, "blocks": len(v_blocks), "chars": p_chars, "method": method
+                    })
+                else:
+                    logger.error(f"Page {i+1}: FAILED after {len(pages_attempted)} passes.")
+                    final_report["metrics"]["page_level"].append({"page": i+1, "status": "FAILED"})
                 
-                if ocr_res:
-                    for page in ocr_res:
-                        if not page: continue
-                        for line in page:
-                            if isinstance(line, list) and len(line) == 2:
-                                box, (text, score) = line
-                                all_ocr_results.append({"text": text, "confidence": float(score), "bbox": box, "page": i+1})
+                final_report["metrics"]["pass_results"].append({"page": i+1, "results": pages_attempted})
                 
-                # 2. Structure/Table Analysis
-                if self.structure_engine:
-                    logger.info(f"Page {i+1}: Layout Analysis (V3)...")
-                    struct_res = self.structure_engine(temp_ocr_path)
+                # DEBUG Visuals
+                if debug_mode:
+                    for p in passes:
+                        debug_path = f"{img_path}_p{i+1}_{p['name']}.png"
+                        cv2.imwrite(debug_path, p["img"])
+
+                # 3. Structure Analysis (V3)
+                if self.structure_engine and best_page_result and best_page_result[0]:
+                    struct_start = time.perf_counter()
+                    # Feed the successful image to the layout engine
+                    # If Pass 0 (raw) was used, we use Pass 0 image
+                    winner_img = passes[0]["img"] 
+                    for p in passes:
+                        if p["name"] == best_page_result[1]:
+                            winner_img = p["img"]
+                            break
+                            
+                    struct_res = self.structure_engine(winner_img)
                     for region in struct_res:
                         if region["type"] == "table":
                             md = self._format_table_markdown(region)
-                            if md: all_table_markdown.append(f"Page {i+1} Table:\n{md}")
-                else:
-                    logger.warning(f"Page {i+1}: Skipping Layout Analysis (Engine Offline)")
-                
-                if os.path.exists(temp_ocr_path): os.remove(temp_ocr_path)
+                            if md: final_report["all_table_markdown"].append(f"Page {i+1} Table:\n{md}")
+                    logger.info(f"Page {i+1}: Layout Analysis completed in {time.perf_counter() - struct_start:.2f}s")
                             
             except Exception as e:
-                logger.exception(f"Robust Processor Error on page {i+1}: {str(e)}")
+                logger.exception(f"Processor Critical on page {i+1}: {str(e)}")
+        
+        # Final Metrics
+        final_report["metrics"]["total_ocr_duration"] = round(time.perf_counter() - global_start, 2)
+        if len(all_page_blocks) > 1:
+            final_report["metrics"]["block_variance"] = float(np.var(all_page_blocks))
+            final_report["metrics"]["confidence_variance"] = float(np.var(all_page_confs))
                 
-        return all_ocr_results, "\n\n".join(all_table_markdown)
+        return final_report

@@ -50,6 +50,33 @@ async def get_history(limit: int = 10):
         logger.error(f"Error fetching history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.on_event("startup")
+async def startup_event():
+    logger.info("--- IDP Platform Enterprise Health Check ---")
+    from app.processor import DocumentProcessor
+    from app.llm_utils import LLMHybridLayer
+    
+    proc = DocumentProcessor()
+    llm = LLMHybridLayer()
+    
+    ocr_status = "ONLINE" if proc.ocr else "OFFLINE"
+    struct_status = "ONLINE (V3)" if proc.structure_engine else "OFFLINE (Layout Analysis limited)"
+    
+    # Active LLM Probe
+    logger.info("[LLM] Performing active probe...")
+    llm_report = llm.probe_model()
+    llm_status = llm_report["status"]
+    llm_msg = llm_report["msg"]
+    
+    logger.info(f"OCR Engine: {ocr_status}")
+    logger.info(f"Layout Engine: {struct_status}")
+    logger.info(f"LLM Engine: {llm_status} ({llm_msg})")
+    
+    if "OFFLINE" in [ocr_status, llm_status]:
+        logger.critical("CRITICAL DEPENDENCY MISSING. SYSTEM OPERATING IN DEGRADED MODE.")
+    
+    logger.info("--------------------------------------------")
+
 @app.get("/analytics")
 async def get_analytics():
     """Returns system-wide stats for the Dashboard."""

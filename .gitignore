@@ -44,6 +44,9 @@ tests/verify_robustness.py
 tests/brute_force_ocr.py
 debug_variant_*.png
 uploads/*_robust_ocr.png
+debug_*.png
+debug_ocr.py
+celerybeat-schedule
 *.png
 !frontend/*.png
 !static/*.png

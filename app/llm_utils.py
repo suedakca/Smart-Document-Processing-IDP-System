@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 from jinja2 import Environment, FileSystemLoader
 from .schemas import ExtractionResult
 from .masking import PIIMasker
+from .db_client import DatabaseClient
 
 class LLMHybridLayer:
     """
@@ -45,8 +46,9 @@ class LLMHybridLayer:
             db_examples = self.db.get_verified_examples(category, limit=3)
             formatted = []
             for ex in db_examples:
+                # Use real raw_text as the input for the few-shot pair
                 formatted.append({
-                    "input": "DB_VERIFIED_EXAMPLE",
+                    "input": ex["raw_text"] if ex["raw_text"] else "SAMPLE_DOC_TEXT",
                     "output": json.loads(ex["corrected_json"])
                 })
             return formatted

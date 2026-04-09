@@ -1,5 +1,7 @@
 import sqlite3
 import json
+import uuid
+from loguru import logger
 
 class DatabaseClient:
     def __init__(self, db_path="idp_results.db"):
@@ -48,6 +50,23 @@ class DatabaseClient:
                 FOREIGN KEY(api_key_id) REFERENCES api_keys(id)
             )
         ''')
+        
+        # Robust Migration: Check and add missing columns
+        cursor.execute("PRAGMA table_info(extractions)")
+        existing_cols = [row[1] for row in cursor.fetchall()]
+        
+        for col, col_def in [
+            ("is_verified", "INTEGER DEFAULT 0"),
+            ("corrected_json", "TEXT"),
+            ("processing_time", "REAL"),
+            ("error_type", "TEXT"),
+            ("api_key_id", "INTEGER"),
+            ("raw_text", "TEXT")
+        ]:
+            if col not in existing_cols:
+                logger.info(f"Database Migration: Adding column {col} to extractions table")
+                cursor.execute(f"ALTER TABLE extractions ADD COLUMN {col} {col_def}")
+                
         conn.commit()
         conn.close()
 
@@ -72,13 +91,13 @@ class DatabaseClient:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT document_type, corrected_json FROM extractions 
+            SELECT raw_text, corrected_json FROM extractions 
             WHERE document_type = ? AND is_verified = 1 
             ORDER BY created_at DESC LIMIT ?
         ''', (doc_type, limit))
         rows = cursor.fetchall()
         conn.close()
-        return [dict(row) for row in rows]
+        return [{"raw_text": row["raw_text"], "corrected_json": row["corrected_json"]} for row in rows]
 
     def create_api_key(self, user_name, label="Default"):
         conn = sqlite3.connect(self.db_path)
@@ -102,13 +121,13 @@ class DatabaseClient:
         conn.close()
         return row[0] if row else None
 
-    def save_result(self, filename, doc_type, trust_score, result_dict, processing_time=0.0, error_type=None, key_id=None):
+    def save_result(self, filename, doc_type, trust_score, result_dict, processing_time=0.0, error_type=None, key_id=None, raw_text=None):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO extractions (filename, document_type, trust_score, extracted_json, processing_time, error_type, api_key_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (filename, doc_type, trust_score, json.dumps(result_dict), processing_time, error_type, key_id))
+            INSERT INTO extractions (filename, document_type, trust_score, extracted_json, processing_time, error_type, api_key_id, raw_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (filename, doc_type, trust_score, json.dumps(result_dict), processing_time, error_type, key_id, raw_text))
         conn.commit()
         conn.close()
 

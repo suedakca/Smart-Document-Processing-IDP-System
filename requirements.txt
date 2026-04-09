@@ -1,4 +1,4 @@
-paddleocr>=2.7.0
+paddleocr[layout]>=2.7.0
 paddlepaddle>=2.5.2
 opencv-python-headless
 fastapi
@@ -21,3 +21,5 @@ spacy
 lxml
 pandas
 fastapi-limiter
+google-generativeai
+openai

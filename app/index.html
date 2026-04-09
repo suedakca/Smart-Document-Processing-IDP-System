@@ -184,32 +184,55 @@
         <div id="dashboard-section" style="display: none;">
             <div class="dashboard-grid">
                 <div class="v3-card stat-card">
-                    <div class="v3-title">TOTAL ANALYSED</div>
-                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="v3-title">PLATFORM EFFICIENCY</div>
+                    <div class="stat-value" id="stat-efficiency">0h</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);" id="stat-automation">0% Automation</div>
                 </div>
                 <div class="v3-card stat-card">
-                    <div class="v3-title">CONFIDENCE RATE</div>
-                    <div class="stat-value" id="stat-success">0%</div>
+                    <div class="v3-title">AVERAGE ACCURACY</div>
+                    <div class="stat-value" id="stat-accuracy">0%</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">Last 7 Days</div>
                 </div>
                 <div class="v3-card stat-card">
-                    <div class="v3-title">LEARNING PROGRESS</div>
-                    <div class="stat-value" style="color: var(--success);" id="stat-verified">0</div>
+                    <div class="v3-title">KNOWLEDGE BASE</div>
+                    <div class="stat-value" style="color: var(--success);" id="stat-knowledge">0</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">Verified Points</div>
                 </div>
             </div>
-            <div class="v3-card">
-                <canvas id="chart-docs" height="150"></canvas>
+
+            <div class="result-grid">
+                <div class="v3-card" style="margin-bottom: 0;">
+                    <div class="v3-title">DOCUMENT DISTRIBUTION</div>
+                    <canvas id="chart-docs" height="200"></canvas>
+                </div>
+                <div class="v3-card" id="anomaly-container" style="margin-bottom: 0; overflow-y: auto;">
+                    <div class="v3-title">ACTIVE ANOMALIES & ALERTS</div>
+                    <div id="anomaly-list">
+                        <!-- Anomalies will be injected here -->
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
         const fileInput = document.getElementById('file-input');
+        const dropZone = document.getElementById('drop-zone');
         const uploadBtn = document.getElementById('upload-btn');
         const resultsSection = document.getElementById('results-section');
         const spinnerIcon = document.getElementById('spinner-icon');
         const saveCorrectionBtn = document.getElementById('save-correction-btn');
         let currentJobId = null;
         let charts = {};
+
+        // Show filename when selected
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                const fileName = fileInput.files[0].name;
+                dropZone.querySelector('p').innerHTML = `Seçilen Dosya: <span style="color: var(--success); font-weight: 700;">${fileName}</span>`;
+                dropZone.style.borderColor = 'var(--success)';
+            }
+        });
 
         function getAuthHeader() {
             const key = document.getElementById('api-key').value;
@@ -226,12 +249,47 @@
 
         async function loadDashboard() {
             try {
-                const res = await fetch('/analytics', { headers: getAuthHeader() });
-                const data = await res.json();
-                document.getElementById('stat-total').innerText = data.total_documents;
-                document.getElementById('stat-success').innerText = data.success_rate.toFixed(1) + '%';
-                // Success counts corrected docs in V4
-                renderCharts(data.doc_types);
+                // 1. Fetch Basic Analytics (Old)
+                const analyticsRes = await fetch('/analytics', { headers: getAuthHeader() });
+                const analyticsData = await analyticsRes.json();
+                renderCharts(analyticsData.doc_types);
+
+                // 2. Fetch Platform Intelligence (New)
+                const intelRes = await fetch('/platform/intelligence', { headers: getAuthHeader() });
+                const intel = await intelRes.json();
+                
+                document.getElementById('stat-efficiency').innerText = (intel.efficiency.hours_saved || 0) + 'h';
+                document.getElementById('stat-automation').innerText = (intel.efficiency.automation_rate || 0) + '% Automation';
+                document.getElementById('stat-accuracy').innerText = (intel.accuracy_score || 0) + '%';
+                document.getElementById('stat-knowledge').innerText = intel.knowledge_base_size || 0;
+
+                // 3. Fetch Anomalies
+                const anomalyRes = await fetch('/platform/anomalies', { headers: getAuthHeader() });
+                const anomalies = await anomalyRes.json();
+                const container = document.getElementById('anomaly-list');
+                container.innerHTML = '';
+                
+                if (anomalies.length === 0) {
+                    container.innerHTML = '<p style="font-size: 0.8rem; color: var(--text-muted);">No anomalies detected in recent items.</p>';
+                }
+
+                anomalies.forEach(a => {
+                    const item = document.createElement('div');
+                    item.className = 'adjustment-item';
+                    item.style.borderLeft = '4px solid var(--error)';
+                    item.innerHTML = `
+                        <div style="flex: 1;">
+                            <div style="font-size: 0.75rem; font-weight: 700;">${a.document_type}</div>
+                            <div style="font-size: 0.65rem; color: var(--text-muted);">${a.filename}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="color: var(--error); font-weight: 800; font-size: 0.8rem;">${(a.trust_score * 100).toFixed(0)}% Trust</div>
+                            <div style="font-size: 0.65rem;">${a.processing_time.toFixed(1)}s Delay</div>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+
             } catch (err) { console.error(err); }
         }
 
@@ -239,27 +297,58 @@
             const ctx = document.getElementById('chart-docs').getContext('2d');
             if (charts.docs) charts.docs.destroy();
             charts.docs = new Chart(ctx, {
-                type: 'bar',
-                data: { labels: Object.keys(docs), datasets: [{ label: 'Docs', data: Object.values(docs), backgroundColor: '#6366f1' }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                type: 'doughnut',
+                data: { 
+                    labels: Object.keys(docs), 
+                    datasets: [{ 
+                        data: Object.values(docs), 
+                        backgroundColor: ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
+                        borderWidth: 0
+                    }] 
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    plugins: { 
+                        legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 } } } 
+                    } 
+                }
             });
         }
 
         uploadBtn.onclick = async () => {
+            const key = document.getElementById('api-key').value;
+            if (!key) return alert("Lütfen X-API-KEY alanını doldurun. (Key almak için: /setup-key?name=Admin)");
+
             const file = fileInput.files[0];
-            if (!file) return alert("Dosya seçiniz.");
+            if (!file) return alert("Lütfen bir dosya seçiniz.");
+            
             spinnerIcon.style.display = 'inline-block';
             uploadBtn.disabled = true;
+            
             const formData = new FormData();
             formData.append('file', file);
             const mask_pii = document.getElementById('kvkk-toggle').checked;
+            
             try {
                 const response = await fetch(`/process?mask_pii=${mask_pii}`, { 
-                    method: 'POST', body: formData, headers: { 'X-API-KEY': document.getElementById('api-key').value }
+                    method: 'POST', 
+                    body: formData, 
+                    headers: { 'X-API-KEY': key }
                 });
+                
                 const initResult = await response.json();
-                if (response.ok) { currentJobId = initResult.job_id; pollStatus(initResult.job_id); }
-            } catch (err) { alert('Bağlantı Hatası'); resetUI(); }
+                if (response.ok) { 
+                    currentJobId = initResult.job_id; 
+                    pollStatus(initResult.job_id); 
+                } else {
+                    alert(`Hata (${response.status}): ${initResult.detail || 'Dosya yüklenemedi'}`);
+                    resetUI();
+                }
+            } catch (err) { 
+                alert('Bağlantı Hatası: Sunucuya erişilemiyor.'); 
+                resetUI(); 
+            }
         };
 
         async function pollStatus(jobId) {
@@ -268,7 +357,7 @@
                 const data = await response.json();
                 if (data.status === 'SUCCESS') { renderResult(data.result); resetUI(); } 
                 else if (data.status === 'FAILURE') { alert('Hata: ' + data.error); resetUI(); }
-                else setTimeout(() => pollStatus(jobId), 2000);
+                else setTimeout(() => pollStatus(jobId), 5000);
             } catch (err) { console.error(err); }
         }
 

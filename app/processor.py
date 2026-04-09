@@ -1,4 +1,11 @@
-from paddleocr import PaddleOCR, PPStructure
+try:
+    from paddleocr import PaddleOCR, PPStructure
+except ImportError:
+    from paddleocr import PaddleOCR
+    try:
+        from paddleocr.paddleocr import PPStructure
+    except ImportError:
+        PPStructure = None
 import os
 import cv2
 from loguru import logger
@@ -7,10 +14,19 @@ from .preprocessing import ImagePreprocessor
 class DocumentProcessor:
     def __init__(self, lang='tr'):
         # OCR Engine for standard text
-        self.ocr = PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
-        # Structure Engine for Tables and Layout
-        self.structure_engine = PPStructure(show_log=False, image_orientation=True, lang='en') # Structure works better with 'en' for layout
+        self.ocr = PaddleOCR(use_angle_cls=True, lang='tr')
         self.preprocessor = ImagePreprocessor()
+        
+        # Initialize Structure Engine safely
+        self.structure_engine = None
+        if PPStructure is not None:
+            try:
+                # Basic initialization to avoid unsupported param errors
+                self.structure_engine = PPStructure(show_log=False)
+                logger.info("Table analysis engine (PPStructure) initialized.")
+            except Exception as e:
+                logger.warning(f"Failed to load PPStructure: {str(e)}. Table analysis will be skipped.")
+                self.structure_engine = None
 
     def _format_table_markdown(self, table_info: dict) -> str:
         """
@@ -54,12 +70,15 @@ class DocumentProcessor:
                                 all_ocr_results.append({"text": text, "confidence": float(score), "bbox": box, "page": i+1})
                 
                 # 2. Structure/Table Analysis
-                logger.info(f"Page {i+1}: Layout Analysis...")
-                struct_res = self.structure_engine(temp_ocr_path)
-                for region in struct_res:
-                    if region["type"] == "table":
-                        md = self._format_table_markdown(region)
-                        if md: all_table_markdown.append(f"Page {i+1} Table:\n{md}")
+                if self.structure_engine:
+                    logger.info(f"Page {i+1}: Layout Analysis...")
+                    struct_res = self.structure_engine(temp_ocr_path)
+                    for region in struct_res:
+                        if region["type"] == "table":
+                            md = self._format_table_markdown(region)
+                            if md: all_table_markdown.append(f"Page {i+1} Table:\n{md}")
+                else:
+                    logger.warning(f"Page {i+1}: Skipping Layout Analysis (Engine Offline)")
                 
                 if os.path.exists(temp_ocr_path): os.remove(temp_ocr_path)
                             

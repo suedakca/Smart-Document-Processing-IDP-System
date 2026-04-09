@@ -79,13 +79,13 @@ class ImagePreprocessor:
         # 1. Resize if too large
         img = self.resize_if_needed(img)
         
-        # 2. Deskew
-        img = self.deskew(img)
+        # 2. Simple Grayscale (Skip aggressive contrast if not needed)
+        gray = self.grayscale(img)
         
-        # 3. CLAHE Contrast (returns grayscale)
-        processed = self.adjust_contrast(img)
+        # 3. Simple threshold or CLAHE only if low contrast
+        # For now, let's use a simpler approach to avoid corrupting the image
+        processed = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
         
-        # Optional: Sharpen if still blurry? 
-        # processed = self.sharpen(processed)
-        
-        return processed
+        # Note: If PaddleOCR performs better with raw grayscale, we can skip thresholding.
+        # Let's return the grayscale version first as PaddleOCR has built-in binarization.
+        return gray

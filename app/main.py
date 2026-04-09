@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Security, Query
 import shutil
 import os
@@ -5,17 +8,16 @@ import uuid
 from fastapi.responses import HTMLResponse, FileResponse
 from loguru import logger
 from .db_client import DatabaseClient
-from .worker import process_document_task
+from .worker import celery_app, process_document_v2
 from .schemas import JobStatus, ExtractionResult
-from .auth import get_api_key
+from .auth import get_api_key, check_rate_limit
 from .exporters import DocumentExporter
+from .intelligence import IntelligenceEngine
 from celery.result import AsyncResult
-from dotenv import load_dotenv
 
-load_dotenv()
-
-app = FastAPI(title="Smart IDP System", description="Corporate Asynchronous IDP API")
+app = FastAPI(title="Smart IDP System", description="Corporate Learning IDP Platform")
 db = DatabaseClient()
+intel = IntelligenceEngine()
 UPLOAD_DIR = "uploads"
 EXPORT_DIR = "exports"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -50,7 +52,7 @@ async def get_analytics(key_id: int = Depends(get_api_key)):
 async def process_document(
     file: UploadFile = File(...), 
     mask_pii: bool = False, 
-    key_id: int = Depends(get_api_key)
+    key_id: int = Depends(check_rate_limit)
 ):
     file_ext = os.path.splitext(file.filename)[1].lower()
     if file_ext not in [".png", ".jpg", ".jpeg", ".pdf"]:
@@ -64,7 +66,7 @@ async def process_document(
             shutil.copyfileobj(file.file, buffer)
         
         # Pass key_id to track usage
-        job = process_document_task.delay(temp_path, file.filename, mask_pii=mask_pii, key_id=key_id)
+        job = process_document_v2.delay(temp_path, file.filename, mask_pii=mask_pii, key_id=key_id)
         return {"job_id": job.id, "status": "PENDING"}
         
     except Exception as e:
@@ -74,18 +76,46 @@ async def process_document(
 
 @app.get("/status/{job_id}", response_model=JobStatus)
 async def get_status(job_id: str, key_id: int = Depends(get_api_key)):
+    """
+    Check status of an extraction job.
+    """
     try:
-        job = AsyncResult(job_id)
-        if job.ready():
-            return {"job_id": job_id, "status": "SUCCESS" if job.successful() else "FAILURE", "result": job.result}
-        return {"job_id": job_id, "status": job.status, "result": None}
+        res = AsyncResult(job_id, app=celery_app)
+        state = res.state
+        
+        result_data = None
+        error_msg = None
+        
+        if state == "SUCCESS":
+            try:
+                result_data = res.result
+            except Exception as e:
+                logger.error(f"Failed to decode SUCCESS result: {str(e)}")
+                state = "ERROR"
+                error_msg = f"Decoding error: {str(e)}"
+        elif state == "FAILURE":
+            # Attempt to get the error message safely
+            try:
+                # result on a failed task often contains the string representation of the exception
+                error_msg = str(res.result)
+            except:
+                error_msg = "Processing failed. Check worker logs for details."
+            
+        return {
+            "job_id": job_id, 
+            "status": state, 
+            "result": result_data,
+            "error": error_msg
+        }
+        
     except Exception as e:
-        raise HTTPException(status_code=404, detail="Job not found.")
+        logger.error(f"Status check failed for {job_id}: {str(e)}")
+        return {"job_id": job_id, "status": "PENDING", "msg": "Job state unknown or pending"}
 
 @app.get("/export/{job_id}")
 async def export_document(job_id: str, format: str = Query("csv", enum=["csv", "ubl"]), key_id: int = Depends(get_api_key)):
     """Exports processed data to CSV or UBL-TR XML."""
-    job = AsyncResult(job_id)
+    job = AsyncResult(job_id, app=celery_app)
     if not job.ready() or not job.successful():
         raise HTTPException(status_code=400, detail="Job not ready or failed.")
     
@@ -112,6 +142,16 @@ async def submit_correction(job_id: str, corrected_data: dict, key_id: int = Dep
     except Exception as e:
         logger.error(f"Failed to save correction for job {job_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Could not save correction.")
+
+@app.get("/platform/intelligence")
+async def get_platform_intelligence(key_id: int = Depends(get_api_key)):
+    """Returns high-level business intelligence from the platform."""
+    return intel.get_platform_insights()
+
+@app.get("/platform/anomalies")
+async def get_platform_anomalies(limit: int = 5, key_id: int = Depends(get_api_key)):
+    """Returns detected anomalies across all extractions."""
+    return intel.detect_anomalies(limit=limit)
 
 if __name__ == "__main__":
     import uvicorn

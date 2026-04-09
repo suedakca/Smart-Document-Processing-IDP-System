@@ -1,54 +1,85 @@
-# 📄 Smart Document Processing (IDP) System
+# 📄 Smart Document Processing (IDP) System - Corporate V4
 
-Bu sistem, taranmış dokümanlardaki (fatura, form, dekont) verileri **PaddleOCR (PP-OCRv5)** kullanarak yüksek doğrulukla ayıklayan ve yapılandırılmamış veriyi JSON formatına dönüştüren uçtan uca bir veri işleme hattıdır.
+Bu sistem, taranmış dokümanlardaki (fatura, form, dekont, çok sayfalı PDF) verileri **PaddleOCR (PP-OCRv5)** ve **Large Language Models (LLM)** kullanarak yüksek doğrulukla ayıklayan, yapılandıran ve kendi kendine öğrenebilen uçtan uca bir kurumsal veri işleme platformudur.
 
-## 🚀 Özellikler
+## 🚀 Öne Çıkan Özellikler (V4 Modernizasyonu)
 
-*   **Akıllı IDP Hattı:** Görüntüden yapılandırılmış veriye uçtan uca otonom işleme.
-*   **Gelişmiş Ön İşleme:** Otomatik eğiklik düzeltme (deskewing) ve adaptif gürültü temizleme.
-*   **Belge Sınıflandırma:** Fatura, Kimlik, Sözleşme ve Dekont türlerini otomatik tanıma.
-*   **Veri Doğrulama:** Matematiksel tutarlılık kontrolleri ve format doğrulaması.
-*   **Güvenlik & Anomali Tespiti:** Belge düzeni ve metin yoğunluğu üzerinden "Güven Skoru" üretimi.
-*   **Modern UI:** Glassmorphism tasarımı ile gerçek zamanlı JSON ve metaveri önizleme.
+- **⚡ Asenkron Mimari:** İşlemler FastAPI, Celery ve Redis kullanılarak arka planda kuyruğa alınır. Büyük PDF dosyaları sistemi bloklamadan işlenir.
+- **📄 Çok Sayfalı PDF Desteği:** PyMuPDF entegrasyonu ile çok sayfalı dokümanlar yüksek çözünürlüklü görsellere dönüştürülerek sayfa sayfa işlenir.
+- **📊 Akıllı Tablo Analizi:** **PaddleStructure (PPStructure)** ile dokümanlardaki tablolar otomatik tespit edilir ve Markdown formatına dönüştürülerek LLM'e beslenir.
+- **🧠 Kendi Kendine Öğrenme (Self-Learning):** İnsan-in-the-loop geri bildirim döngüsü ile hatalar düzeltilir. Sistem, bu düzeltmeleri **Dinamik Few-Shot** olarak kullanarak benzer dokümanlarda hata yapmamayı öğrenir.
+- **🔒 Kurumsal Güvenlik & KVKK:**
+  - **API Auth:** X-API-KEY tabanlı yetkilendirme ve departman yönetimi.
+  - **Rate Limiting:** Redis tabanlı hız sınırlaması (20 istek/dakika).
+  - **PII Masking:** Hassas verilerin (TC No, IBAN, Tel) LLM'e gitmeden önce maskelenmesi ve sonuçta geri yüklenmesi.
+- **📈 Dashboard & Analitik:** Chart.js destekli görsel panel ile başarı oranları, işlem süreleri ve doküman dağılımı takibi.
+- **🏦 Finansal Doğrulama:** Hiyerarşik matematiksel kontrol motoru ile ara toplamlar ve vergilerin genel toplamla tutarlılığı %100 denetlenir.
+- **📂 Kurumsal Export:** Sonuçların **UBL-TR 2.1 (XML)** e-Fatura formatında veya **CSV** olarak indirilmesi.
+- **☁️ Hibrit LLM Desteği:** Gemini 1.5 Flash (Bulut) veya Llama 3 / Mistral (Yerel - Ollama) ile çalışma imkanı.
 
 ## 🛠 Teknik Yığın (Tech Stack)
 
-*   **Dil:** Python 3.10+
-*   **OCR:** PaddleOCR (v5)
-*   **Backend:** FastAPI
-*   **Frontend:** Vanilla JS & CSS (Glassmorphism)
-*   **Altyapı:** Docker & Docker Compose
+| Katman | Teknoloji |
+| :--- | :--- |
+| **Backend** | Python 3.10+, FastAPI |
+| **Task Queue** | Celery & Redis |
+| **OCR & Layout** | PaddleOCR (PP-OCRv5), PaddleStructure |
+| **Intelligence** | Gemini 1.5 Flash / Llama 3 (Ollama) |
+| **Database** | SQLite & Redis (Metadata & Rate Limit) |
+| **Frontend** | Vanilla JS, CSS (Responsive), Chart.js |
+| **Altyapı** | Docker & Docker Compose |
 
-## 📦 Kurulum ve Çalıştırma
+## 📐 Sistem Mimarisi
+
+```mermaid
+graph TD
+    A[User/App] -->|Upload / API Key| B(FastAPI Gateway)
+    B -->|Check Rate Limit| C{Redis}
+    B -->|Queue Task| D[Celery Worker]
+    D -->|PDF to Images| E[File Handler]
+    E -->|OCR & Table Analysis| F[Paddle Engine]
+    F -->|PII Masking| G[LLM Layer]
+    G -->|Dynamic Few-Shot| H[(Verified Examples DB)]
+    G -->|Prompting| I[Gemini / Local Llama3]
+    I -->|JSON Extraction| J[Math Validator]
+    J -->|Verified Task| K[(Results DB)]
+    K -->|Notify| B
+    B -->|Download| L[UBL-TR / CSV Export]
+```
+
+## 📦 Kurulum ve Başlatma
 
 ### 1. Docker ile (Önerilen)
 
 ```bash
 docker-compose up --build
 ```
-API'ye `http://localhost:8000` adresinden erişebilirsiniz.
 
-### 2. Yerel Kurulum (Local)
+### 2. .env Yapılandırması
 
-```bash
-# Bağımlılıkları yükleyin
-pip3 install -r requirements.txt
-
-# Uygulamayı çalıştırın
-python3 -m app.main
+Proje kök dizininde bir `.env` dosyası oluşturun:
+```env
+LLM_API_KEY=your_gemini_api_key
+REDIS_URL=redis://localhost:6379/0
+CELERY_BROKER_URL=redis://localhost:6379/1
+# Yerel Model Kullanımı İçin (Opsiyonel):
+LLM_PROVIDER=GEMINI # veya LOCAL
+LLM_MODEL=gemini-1.5-flash # veya llama3
+LOCAL_LLM_URL=http://localhost:11434/v1
 ```
 
-## 📐 Sistem Mimarisi
+### 3. İlk API Key Oluşturma
 
-1.  **Görüntü Ön İşleme:** Gürültü azaltma ve netleştirme.
-2.  **OCR Katmanı:** Metin algılama ve tanıma (Türkçe karakter desteği dahil).
-3.  **Veri Yapılandırma:** Ham metinden anlamlı alanların çıkarılması.
-4.  **Entegrasyon:** REST API üzerinden çıktıların sunulması.
+Sistemi kullanmaya başlamak için bir API anahtarı üretin:
+`http://localhost:8000/setup-key?name=Departman_Adi`
 
-## 📊 Performans
+## 📖 Kullanım Rehberi
 
-*   **Hız:** Sayfa başına < 1.5 sn (CPU), < 0.5 sn (GPU).
-*   **Doğruluk:** Standart dokümanlarda %98.2+.
+1.  **Giriş:** Ürettiğiniz API Key'i ana sayfadaki `X-API-KEY` alanına yapıştırın.
+2.  **Yükleme:** PDF veya görsel dosyanızı sürükleyin. KVKK Modu'nu seçerek anonimleştirme yapabilirsiniz.
+3.  **Analiz:** İşlem bittiğinde hiyerarşik sonuçları ve matematiksel doğruluğu kontrol edin.
+4.  **Eğitim (Self-Learning):** Eğer AI çıktısında hata varsa, JSON editöründen düzeltin ve **"Sisteme Öğret"** butonuna basın. Gelecekteki benzer dokümanlar bu düzeltmeyi referans alacaktır.
+5.  **Analytics:** Dashboard üzerinden sistem verimliliğini ve başarı oranınızı izleyin.
 
 ---
 *Geliştiren: Sueda Akça*

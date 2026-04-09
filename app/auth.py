@@ -1,7 +1,9 @@
-from fastapi import Security, HTTPException, status
+from fastapi import Security, HTTPException, status, Depends
 from fastapi.security.api_key import APIKeyHeader
 from .db_client import DatabaseClient
 from loguru import logger
+from dotenv import load_dotenv
+load_dotenv()
 import redis
 import os
 
@@ -10,7 +12,7 @@ db = DatabaseClient()
 
 # Redis for Rate Limiting (Phase 3)
 try:
-    redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/1"))
+    redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 except Exception as e:
     logger.warning(f"Redis connection for rate limiting failed: {str(e)}")
     redis_client = None
@@ -28,21 +30,26 @@ async def get_api_key(api_key_header: str = Security(api_key_header)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or Inactive API Key."
         )
-    
-    # Rate Limiting Logic (Simple Fixed Window)
+    return key_id
+
+async def check_rate_limit(key_id: int = Depends(get_api_key)):
+    """Optional dependency to apply rate limiting to specific endpoints."""
     if redis_client:
         limit_key = f"rate_limit:{key_id}"
-        current_usage = redis_client.get(limit_key)
-        
-        if current_usage and int(current_usage) >= 20: # 20 requests per minute limit
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded (20 req/min). Upgrade for higher limits."
-            )
-        
-        pipe = redis_client.pipeline()
-        pipe.incr(limit_key)
-        pipe.expire(limit_key, 60) # Reset every 60 seconds
-        pipe.execute()
-
+        try:
+            current_usage = redis_client.get(limit_key)
+            if current_usage and int(current_usage) >= 20: 
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Rate limit exceeded (Max 20 processing/min)."
+                )
+            
+            pipe = redis_client.pipeline()
+            pipe.incr(limit_key)
+            pipe.expire(limit_key, 60)
+            pipe.execute()
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Rate limiter failed: {str(e)}")
     return key_id

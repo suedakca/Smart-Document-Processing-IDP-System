@@ -25,6 +25,10 @@ GOALS:
 1. Identify the 'root_transaction' (Final Total Amount).
 2. Validate 'root_transaction' against 'written_amount' (text representation).
 3. Extract 'adjustments_and_fees' (Sub-items like Tax, Fee, Subtotal).
+4. Identify BANKING METADATA: 
+   - Look for 'TR' followed by 24 digits (IBAN). 
+   - Look for Reference Numbers (Referans, Islem No, Dekont No).
+   - Look for the official Transaction Date.
 
 Return ONLY a JSON object matching this schema:
 {

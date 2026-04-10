@@ -46,6 +46,41 @@ class ValidationEngine:
             return 0.0
 
     @staticmethod
+    def find_iban_regex(text):
+        """Scans for TR-IBAN patterns (TR + 24 digits, with/without spaces)."""
+        pattern = r"TR\d{2}[\s\d]{22,28}"
+        matches = re.findall(pattern, text)
+        for m in matches:
+            clean = m.replace(" ", "")
+            if len(clean) == 26:
+                return clean
+        return None
+
+    @staticmethod
+    def find_date_regex(text):
+        """Scans for common transaction date patterns DD.MM.YYYY or DD/MM/YYYY."""
+        pattern = r"(\d{2}[\./]\d{2}[\./]\d{4})"
+        matches = re.findall(pattern, text)
+        if matches:
+            # Normalize to YYYY-MM-DD for consistency
+            d = matches[0].replace("/", ".")
+            parts = d.split(".")
+            if len(parts) == 3:
+                return f"{parts[2]}-{parts[1]}-{parts[0]}"
+        return None
+
+    @staticmethod
+    def find_txid_regex(text):
+        """Scans for common reference number keywords followed by digits."""
+        keywords = ["REF", "İŞLEM NO", "DEKONT NO", "SORGULAMA", "FIS NO", "FİŞ NO"]
+        for kw in keywords:
+            pattern = re.escape(kw) + r"[\s:]*(\d{6,20})"
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+
+    @staticmethod
     def search_by_proximity(label_keywords, ocr_results, threshold=60):
         for label_kw in label_keywords:
             label_box = None
@@ -146,10 +181,41 @@ class DataExtractor:
         if not raw_dynamic:
             return None
 
+        # Prepare full text for deterministic fallback search
+        full_ocr_text = " ".join([res["text"] for res in ocr_results])
+
         # Transform raw values into ValidatedField structures
         try:
             # 1. Document Analysis
             analysis = raw_dynamic.get("document_analysis", {})
+            
+            # --- DETERMINISTIC SELF-HEALING FALLBACKS ---
+            tx_id = analysis.get("transaction_id") or self.validator.find_txid_regex(full_ocr_text)
+            tx_date = analysis.get("transaction_date") or self.validator.find_date_regex(full_ocr_text)
+            
+            # Find ALL IBANs in text
+            ibans = []
+            pattern = r"TR\d{2}[\s\d]{22,32}"
+            potential_ibans = re.findall(pattern, full_ocr_text)
+            for m in potential_ibans:
+                clean = m.replace(" ", "")
+                if len(clean) == 26 and clean not in ibans:
+                    ibans.append(clean)
+            
+            s_iban = analysis.get("sender_iban")
+            r_iban = analysis.get("receiver_iban")
+            
+            # Logic: If AI missed them, and we found IBANs in text, try to assign them sensibly
+            if not s_iban and not r_iban:
+                if len(ibans) >= 2:
+                    s_iban, r_iban = ibans[0], ibans[1]
+                elif len(ibans) == 1:
+                    r_iban = ibans[0] 
+            elif not s_iban and len(ibans) > 0:
+                if ibans[0] != r_iban: s_iban = ibans[0]
+            elif not r_iban and len(ibans) > 0:
+                if ibans[0] != s_iban: r_iban = ibans[0]
+
             structured_analysis = {
                 "type": self._as_validated(analysis.get("type", category)),
                 "status": self._as_validated(analysis.get("status", "VERIFIED")),
@@ -157,10 +223,10 @@ class DataExtractor:
                 "receiver": self._as_validated(analysis.get("receiver"), evidence=self._find_evidence(analysis.get("receiver"), ocr_results)),
                 "description": self._as_validated(analysis.get("description"), evidence=self._find_evidence(analysis.get("description"), ocr_results)),
                 "currency": self._as_validated(analysis.get("currency", "TRY")),
-                "transaction_id": self._as_validated(analysis.get("transaction_id"), evidence=self._find_evidence(analysis.get("transaction_id"), ocr_results)),
-                "transaction_date": self._as_validated(analysis.get("transaction_date"), evidence=self._find_evidence(analysis.get("transaction_date"), ocr_results)),
-                "sender_iban": self._as_validated(analysis.get("sender_iban"), evidence=self._find_evidence(analysis.get("sender_iban"), ocr_results)),
-                "receiver_iban": self._as_validated(analysis.get("receiver_iban"), evidence=self._find_evidence(analysis.get("receiver_iban"), ocr_results)),
+                "transaction_id": self._as_validated(tx_id, source="deterministic_fallback" if not analysis.get("transaction_id") and tx_id else "llm"),
+                "transaction_date": self._as_validated(tx_date, source="deterministic_fallback" if not analysis.get("transaction_date") and tx_date else "llm"),
+                "sender_iban": self._as_validated(s_iban, source="deterministic_fallback" if not analysis.get("sender_iban") and s_iban else "llm"),
+                "receiver_iban": self._as_validated(r_iban, source="deterministic_fallback" if not analysis.get("receiver_iban") and r_iban else "llm"),
             }
 
             # 2. Financial Hierarchy
